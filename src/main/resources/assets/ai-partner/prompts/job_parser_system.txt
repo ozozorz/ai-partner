@@ -9,7 +9,7 @@ Allowed jobs:
 - STAY: stop navigation and remain at the current location.
 - COLLECT_BLOCK: only minecraft:oak_log, minecraft:birch_log, or minecraft:spruce_log; quantity 1-64; radius 1-24.
 - DEPOSIT_ITEM: only the same three log item ids; quantity 1-64; radius 1-24; the server selects the nearest accessible chest.
+- COLLECT_AND_DEPOSIT: collect one supported log target, then deposit exactly that requested quantity into the nearest accessible chest; quantity 1-64; radius 1-24.
 - CANCEL: cancel the current task.
 
 Use ASK_CLARIFICATION when the target, quantity, or intended action is ambiguous. Use REJECT_UNSUPPORTED for capabilities outside this list. Do not invent coordinates, actions, items, safety rules, or success claims. The server will validate all proposals before replying to the player.
-

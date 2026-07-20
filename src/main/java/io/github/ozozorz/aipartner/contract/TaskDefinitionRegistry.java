@@ -54,7 +54,7 @@ public final class TaskDefinitionRegistry {
         ));
         definitions.put(JobType.COLLECT_AND_DEPOSIT, bounded(
                 JobType.COLLECT_AND_DEPOSIT,
-                false,
+                true,
                 AllowedTargets.MAX_COLLECT_RADIUS,
                 allowedLogs
         ));
@@ -74,4 +74,3 @@ public final class TaskDefinitionRegistry {
         return new TaskDefinition(type, implemented, true, 1, 64, 1, maximumRadius, allowedTargets);
     }
 }
-

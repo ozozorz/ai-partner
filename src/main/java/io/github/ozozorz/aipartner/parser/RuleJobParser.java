@@ -13,6 +13,13 @@ import java.util.regex.Pattern;
  */
 public final class RuleJobParser {
     private static final Pattern ARABIC_NUMBER = Pattern.compile("(?<![\\d.])(\\d{1,2})(?![\\d.])");
+    private static final Pattern ARABIC_QUANTITY = Pattern.compile("(?<![\\d.])(\\d{1,2})\\s*(?:个|根|块)");
+    private static final Pattern RADIUS_WITH_BLOCK_UNIT = Pattern.compile(
+            "(?<![\\d.])(\\d{1,2})\\s*格(?:范围)?(?:内|以内)?"
+    );
+    private static final Pattern RADIUS_AFTER_LABEL = Pattern.compile(
+            "(?:半径|范围)\\s*(?:是|为)?\\s*(\\d{1,2})(?![\\d.])"
+    );
     private RuleJobParser() {
     }
 
@@ -30,6 +37,18 @@ public final class RuleJobParser {
         if (containsAny(normalized, "跟着我", "跟随我", "跟我来", "follow", "come with me")) {
             return Optional.of(JobSpec.basic(JobType.FOLLOW));
         }
+        if (isCollectAndDepositInstruction(normalized)) {
+            String target = parseLogTarget(normalized);
+            int quantity = parseQuantity(normalized);
+            if (target != null && quantity > 0) {
+                return Optional.of(new JobSpec(
+                        JobType.COLLECT_AND_DEPOSIT,
+                        target,
+                        quantity,
+                        parseRadius(normalized, AllowedTargets.DEFAULT_COLLECT_RADIUS)
+                ));
+            }
+        }
         if (containsAny(normalized, "放进箱子", "存进箱子", "存入箱子", "deposit", "put in the chest")) {
             String target = parseLogTarget(normalized);
             int quantity = parseQuantity(normalized);
@@ -38,7 +57,10 @@ public final class RuleJobParser {
                         JobType.DEPOSIT_ITEM,
                         target,
                         quantity,
-                        io.github.ozozorz.aipartner.job.ContainerTargets.DEFAULT_DEPOSIT_RADIUS
+                        parseRadius(
+                                normalized,
+                                io.github.ozozorz.aipartner.job.ContainerTargets.DEFAULT_DEPOSIT_RADIUS
+                        )
                 ));
             }
         }
@@ -50,11 +72,24 @@ public final class RuleJobParser {
                         JobType.COLLECT_BLOCK,
                         target,
                         quantity,
-                        AllowedTargets.DEFAULT_COLLECT_RADIUS
+                        parseRadius(normalized, AllowedTargets.DEFAULT_COLLECT_RADIUS)
                 ));
             }
         }
         return Optional.empty();
+    }
+
+    private static boolean isCollectAndDepositInstruction(String message) {
+        boolean requestsCollection = containsAny(message, "收集", "砍", "collect", "chop", "get me");
+        boolean requestsDeposit = containsAny(
+                message,
+                "放进箱子",
+                "存进箱子",
+                "存入箱子",
+                "deposit",
+                "put in the chest"
+        );
+        return requestsCollection && requestsDeposit;
     }
 
     private static String parseLogTarget(String message) {
@@ -71,6 +106,10 @@ public final class RuleJobParser {
     }
 
     private static int parseQuantity(String message) {
+        Matcher explicitQuantity = ARABIC_QUANTITY.matcher(message);
+        if (explicitQuantity.find()) {
+            return Integer.parseInt(explicitQuantity.group(1));
+        }
         Matcher matcher = ARABIC_NUMBER.matcher(message);
         if (matcher.find()) {
             return Integer.parseInt(matcher.group(1));
@@ -85,6 +124,15 @@ public final class RuleJobParser {
             }
         }
         return 0;
+    }
+
+    private static int parseRadius(String message, int defaultRadius) {
+        Matcher withBlockUnit = RADIUS_WITH_BLOCK_UNIT.matcher(message);
+        if (withBlockUnit.find()) {
+            return Integer.parseInt(withBlockUnit.group(1));
+        }
+        Matcher afterLabel = RADIUS_AFTER_LABEL.matcher(message);
+        return afterLabel.find() ? Integer.parseInt(afterLabel.group(1)) : defaultRadius;
     }
 
     private static boolean containsAny(String value, String... candidates) {

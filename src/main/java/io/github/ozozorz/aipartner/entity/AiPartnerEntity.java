@@ -8,6 +8,7 @@ import io.github.ozozorz.aipartner.entity.goal.AiPartnerFollowOwnerGoal;
 import io.github.ozozorz.aipartner.entity.goal.AiPartnerIdleWanderGoal;
 import io.github.ozozorz.aipartner.entity.navigation.AiPartnerPathNavigation;
 import io.github.ozozorz.aipartner.executor.CollectBlockExecutor;
+import io.github.ozozorz.aipartner.executor.CollectAndDepositExecutor;
 import io.github.ozozorz.aipartner.executor.DepositItemExecutor;
 import io.github.ozozorz.aipartner.inventory.AiPartnerMenu;
 import io.github.ozozorz.aipartner.job.JobType;
@@ -71,8 +72,14 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     private final SimpleContainer inventory = new SimpleContainer(AiPartnerMenu.STORAGE_SLOT_COUNT);
     private final CollectBlockExecutor collectBlockExecutor = new CollectBlockExecutor(this);
     private final DepositItemExecutor depositItemExecutor = new DepositItemExecutor(this);
+    private final CollectAndDepositExecutor collectAndDepositExecutor = new CollectAndDepositExecutor(
+            this,
+            collectBlockExecutor,
+            depositItemExecutor
+    );
     private int collectInitialTargetCount;
     private int depositMovedCount;
+    private CollectAndDepositExecutor.Phase compositePhase = CollectAndDepositExecutor.Phase.IDLE;
     private String currentSystemVariant = "RULE_BT";
     private boolean inventoryMenuOpen;
 
@@ -172,6 +179,11 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
                 depositItemExecutor.start(contract);
                 depositMovedCount = 0;
             }
+            case COLLECT_AND_DEPOSIT -> {
+                depositMovedCount = 0;
+                collectAndDepositExecutor.start(contract);
+                collectInitialTargetCount = collectBlockExecutor.initialTargetCount();
+            }
             default -> throw new IllegalStateException("Contract reached executor without an implementation: " + contract.job().type());
         }
         logEvent("contract_running", actor, rawInstruction);
@@ -189,6 +201,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         navigation.stop();
         collectBlockExecutor.stop();
         depositItemExecutor.stop();
+        collectAndDepositExecutor.stop();
         logEvent("contract_failed", null, "runtime_monitor");
         notifyOwner(Component.translatable("message.ai-partner.failed", failureCode.name()));
     }
@@ -269,6 +282,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         navigation.stop();
         collectBlockExecutor.stop();
         depositItemExecutor.stop();
+        collectAndDepositExecutor.stop();
         logEvent("contract_completed", null, "goal_predicate_satisfied");
         notifyOwner(Component.translatable(
                 "message.ai-partner.completed",
@@ -326,6 +340,25 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     }
 
     /**
+     * 保存采集阶段的背包基线，供组合任务跨服务器重启恢复。
+     */
+    public void updateCollectProgressBaseline(int initialTargetCount) {
+        collectInitialTargetCount = Math.max(0, initialTargetCount);
+    }
+
+    /**
+     * 同步组合任务的持久化阶段和客户端行为模式。
+     */
+    public void onCompositePhaseChanged(CollectAndDepositExecutor.Phase nextPhase) {
+        compositePhase = nextPhase;
+        switch (nextPhase) {
+            case COLLECTING -> setMode(PartnerMode.COLLECTING);
+            case DEPOSITING -> setMode(PartnerMode.DEPOSITING);
+            case IDLE, COMPLETE, FAILED -> setMode(PartnerMode.IDLE);
+        }
+    }
+
+    /**
      * 返回面向玩家的背包汇总，不暴露物品 NBT 或内部槽位实现。
      */
     public String inventorySummary() {
@@ -358,6 +391,45 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         return returned;
     }
 
+    /**
+     * 为受控实验场景清除任务状态，并先把原背包和装备安全归还管理员玩家。
+     */
+    public void resetForExperiment(ServerPlayer actor) {
+        if (level().isClientSide()) {
+            throw new IllegalStateException("Experiment reset may only run on the server");
+        }
+        cancelExistingContract(actor, "experiment_reset");
+        currentContract = null;
+        collectAndDepositExecutor.stop();
+        collectBlockExecutor.stop();
+        depositItemExecutor.stop();
+        navigation.stop();
+        for (ItemStack stack : inventory.removeAllItems()) {
+            actor.getInventory().placeItemBackInInventory(stack);
+        }
+        for (EquipmentSlot slot : new EquipmentSlot[]{
+                EquipmentSlot.MAINHAND,
+                EquipmentSlot.OFFHAND,
+                EquipmentSlot.HEAD,
+                EquipmentSlot.CHEST,
+                EquipmentSlot.LEGS,
+                EquipmentSlot.FEET
+        }) {
+            ItemStack equipped = getItemBySlot(slot);
+            if (!equipped.isEmpty()) {
+                setItemSlot(slot, ItemStack.EMPTY);
+                actor.getInventory().placeItemBackInInventory(equipped);
+            }
+        }
+        collectInitialTargetCount = 0;
+        depositMovedCount = 0;
+        compositePhase = CollectAndDepositExecutor.Phase.IDLE;
+        currentSystemVariant = "EXPERIMENT_RESET";
+        inventoryMenuOpen = false;
+        setMode(PartnerMode.IDLE);
+        setHealth(getMaxHealth());
+    }
+
     private void setMode(PartnerMode mode) {
         entityData.set(DATA_MODE, mode.ordinal());
     }
@@ -371,6 +443,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         navigation.stop();
         collectBlockExecutor.stop();
         depositItemExecutor.stop();
+        collectAndDepositExecutor.stop();
         logEvent("contract_cancelled", actor, reason);
     }
 
@@ -397,12 +470,28 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     public void tick() {
         super.tick();
         if (!level().isClientSide() && inventoryMenuOpen) {
-            collectBlockExecutor.pauseForMenuTick();
-            depositItemExecutor.pauseForMenuTick();
+            if (isCompositeContractRunning()) {
+                collectAndDepositExecutor.pauseForMenuTick();
+            } else {
+                collectBlockExecutor.pauseForMenuTick();
+                depositItemExecutor.pauseForMenuTick();
+            }
             return;
+        }
+        if (!level().isClientSide() && isCompositeContractRunning()) {
+            if (!collectAndDepositExecutor.isRunning()) {
+                collectAndDepositExecutor.restore(
+                        currentContract,
+                        compositePhase,
+                        collectInitialTargetCount,
+                        depositMovedCount
+                );
+            }
+            collectAndDepositExecutor.tick((ServerLevel) level());
         }
         if (!level().isClientSide()
                 && getMode() == PartnerMode.COLLECTING
+                && !isCompositeContractRunning()
                 && currentContract != null
                 && currentContract.status() == ContractStatus.RUNNING) {
             if (!collectBlockExecutor.isRunning()) {
@@ -412,6 +501,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         }
         if (!level().isClientSide()
                 && getMode() == PartnerMode.DEPOSITING
+                && !isCompositeContractRunning()
                 && currentContract != null
                 && currentContract.status() == ContractStatus.RUNNING) {
             if (!depositItemExecutor.isRunning()) {
@@ -422,6 +512,12 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         if (!level().isClientSide() && isFollowing() && tickCount % 100 == 0 && getOwner() == null) {
             failActiveContract(FailureCode.OWNER_OFFLINE);
         }
+    }
+
+    private boolean isCompositeContractRunning() {
+        return currentContract != null
+                && currentContract.job().type() == JobType.COLLECT_AND_DEPOSIT
+                && currentContract.status() == ContractStatus.RUNNING;
     }
 
     @Override
@@ -557,6 +653,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         writeInventoryToTag(output);
         output.putInt("CollectInitialTargetCount", collectInitialTargetCount);
         output.putInt("DepositMovedCount", depositMovedCount);
+        output.putString("CompositePhase", compositePhase.name());
         output.putString("CurrentSystemVariant", currentSystemVariant);
         if (currentContract != null) {
             output.putString("ContractId", currentContract.contractId().toString());
@@ -576,6 +673,10 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         readInventoryFromTag(input);
         collectInitialTargetCount = input.getIntOr("CollectInitialTargetCount", 0);
         depositMovedCount = input.getIntOr("DepositMovedCount", 0);
+        compositePhase = CollectAndDepositExecutor.Phase.fromName(input.getStringOr(
+                "CompositePhase",
+                CollectAndDepositExecutor.Phase.COLLECTING.name()
+        ));
         currentSystemVariant = input.getStringOr("CurrentSystemVariant", "RULE_BT");
         setMode(PartnerMode.fromName(input.getStringOr("PartnerMode", PartnerMode.IDLE.name())));
         Optional<String> savedContractId = input.getString("ContractId");

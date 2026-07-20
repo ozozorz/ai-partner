@@ -7,6 +7,7 @@ import io.github.ozozorz.aipartner.job.AllowedTargets;
 import io.github.ozozorz.aipartner.job.ContainerTargets;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Objects;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -24,7 +25,9 @@ public final class DepositItemExecutor {
     private static final double INTERACTION_DISTANCE_SQUARED = 9.0;
 
     private final AiPartnerEntity partner;
+    private final TaskExecutionListener defaultListener;
     private final Set<Long> unavailableContainers = new HashSet<>();
+    private TaskExecutionListener resultListener;
     private State state = State.IDLE;
     private TaskContract contract;
     private Item targetItem;
@@ -39,28 +42,45 @@ public final class DepositItemExecutor {
 
     public DepositItemExecutor(AiPartnerEntity partner) {
         this.partner = partner;
+        this.defaultListener = TaskExecutionListener.activeContract(partner);
+        this.resultListener = defaultListener;
     }
 
     /**
      * 启动新的存放契约。
      */
     public void start(TaskContract taskContract) {
-        start(taskContract, 0);
+        start(taskContract, 0, defaultListener);
+    }
+
+    /**
+     * 使用自定义阶段监听器启动，供固定组合任务复用存放状态机。
+     */
+    public void start(TaskContract taskContract, TaskExecutionListener listener) {
+        start(taskContract, 0, listener);
     }
 
     /**
      * 从实体存档恢复已经完成的部分存放数量。
      */
     public void restore(TaskContract taskContract, int savedMovedCount) {
-        start(taskContract, savedMovedCount);
+        start(taskContract, savedMovedCount, defaultListener);
     }
 
-    private void start(TaskContract taskContract, int initialMovedCount) {
+    /**
+     * 使用保存的已移动数量和自定义监听器恢复组合任务存放阶段。
+     */
+    public void restore(TaskContract taskContract, int savedMovedCount, TaskExecutionListener listener) {
+        start(taskContract, savedMovedCount, listener);
+    }
+
+    private void start(TaskContract taskContract, int initialMovedCount, TaskExecutionListener listener) {
         stop();
+        resultListener = Objects.requireNonNull(listener, "listener");
         contract = taskContract;
         targetItem = AllowedTargets.resolveDepositableItem(taskContract.job().target()).orElse(null);
         if (targetItem == null) {
-            partner.failActiveContract(FailureCode.INTERNAL_ERROR);
+            resultListener.onFailed(FailureCode.INTERNAL_ERROR);
             return;
         }
         origin = partner.blockPosition().immutable();
@@ -136,6 +156,7 @@ public final class DepositItemExecutor {
         deadlineGameTime = 0L;
         sawFullContainer = false;
         unavailableContainers.clear();
+        resultListener = defaultListener;
     }
 
     private void searchForContainer(ServerLevel level) {
@@ -281,7 +302,7 @@ public final class DepositItemExecutor {
 
     private void complete() {
         transitionTo(State.COMPLETE);
-        partner.completeActiveContract();
+        resultListener.onCompleted();
     }
 
     private boolean containerStillUsable(ServerLevel level) {
@@ -319,7 +340,7 @@ public final class DepositItemExecutor {
 
     private void fail(FailureCode failureCode) {
         transitionTo(State.FAILED);
-        partner.failActiveContract(failureCode);
+        resultListener.onFailed(failureCode);
     }
 
     private void transitionTo(State nextState) {

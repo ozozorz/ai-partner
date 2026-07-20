@@ -4,10 +4,16 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import io.github.ozozorz.aipartner.AiPartnerMod;
 import io.github.ozozorz.aipartner.contract.ContractCompiler;
 import io.github.ozozorz.aipartner.contract.ContractDecision;
 import io.github.ozozorz.aipartner.contract.JobSpec;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
+import io.github.ozozorz.aipartner.evaluation.OfflineEvaluationService;
+import io.github.ozozorz.aipartner.experiment.ExperimentScenario;
+import io.github.ozozorz.aipartner.experiment.ExperimentScenarioRegistry;
+import io.github.ozozorz.aipartner.experiment.ExperimentScenarioService;
+import io.github.ozozorz.aipartner.experiment.ExperimentSessionRegistry;
 import io.github.ozozorz.aipartner.job.JobType;
 import io.github.ozozorz.aipartner.job.AllowedTargets;
 import io.github.ozozorz.aipartner.job.ContainerTargets;
@@ -49,6 +55,20 @@ public final class MaidCommand {
                         .then(Commands.literal("status").executes(MaidCommand::status))
                         .then(Commands.literal("inventory").executes(MaidCommand::inventory))
                         .then(Commands.literal("retrieve").executes(MaidCommand::retrieveInventory))
+                        .then(Commands.literal("experiment")
+                                .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                                .then(Commands.literal("list").executes(MaidCommand::listExperimentScenarios))
+                                .then(Commands.literal("reset")
+                                        .then(Commands.argument("scenario", StringArgumentType.word())
+                                                .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                                                        ExperimentScenarioRegistry.ids(),
+                                                        builder
+                                                ))
+                                                .executes(MaidCommand::resetExperimentScenario)))
+                                .then(Commands.literal("disturb").executes(MaidCommand::disturbExperimentScenario))
+                                .then(Commands.literal("context").executes(MaidCommand::showExperimentContext))
+                                .then(Commands.literal("export-evaluation").executes(MaidCommand::exportOfflineEvaluation))
+                                .then(Commands.literal("clear").executes(MaidCommand::clearExperimentContext)))
                         .then(Commands.literal("follow").executes(context -> runBasicJob(context, JobType.FOLLOW)))
                         .then(Commands.literal("stay").executes(context -> runBasicJob(context, JobType.STAY)))
                         .then(Commands.literal("cancel").executes(context -> runBasicJob(context, JobType.CANCEL)))
@@ -86,6 +106,25 @@ public final class MaidCommand {
                                                         "radius",
                                                         IntegerArgumentType.integer(1, ContainerTargets.MAX_DEPOSIT_RADIUS)
                                                 ).executes(context -> runDepositJob(
+                                                        context,
+                                                        IntegerArgumentType.getInteger(context, "radius")
+                                                )))
+                                        )))
+                        .then(Commands.literal("collect-and-deposit")
+                                .then(Commands.argument("block", StringArgumentType.word())
+                                        .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                                                AllowedTargets.suggestedBlockIds(),
+                                                builder
+                                        ))
+                                        .then(Commands.argument("quantity", IntegerArgumentType.integer(1, 64))
+                                                .executes(context -> runCollectAndDepositJob(
+                                                        context,
+                                                        AllowedTargets.DEFAULT_COLLECT_RADIUS
+                                                ))
+                                                .then(Commands.argument(
+                                                        "radius",
+                                                        IntegerArgumentType.integer(1, AllowedTargets.MAX_COLLECT_RADIUS)
+                                                ).executes(context -> runCollectAndDepositJob(
                                                         context,
                                                         IntegerArgumentType.getInteger(context, "radius")
                                                 )))
@@ -171,6 +210,143 @@ public final class MaidCommand {
         return 1;
     }
 
+    private static int listExperimentScenarios(CommandContext<CommandSourceStack> context) {
+        for (ExperimentScenario scenario : ExperimentScenarioRegistry.all()) {
+            context.getSource().sendSuccess(
+                    () -> Component.translatable(
+                            "message.ai-partner.experiment.list_entry",
+                            scenario.id(),
+                            scenario.instruction(),
+                            scenario.expectedOutcome()
+                    ),
+                    false
+            );
+        }
+        return ExperimentScenarioRegistry.all().size();
+    }
+
+    private static int resetExperimentScenario(
+            CommandContext<CommandSourceStack> context
+    ) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        String scenarioId = StringArgumentType.getString(context, "scenario");
+        ExperimentScenario scenario = ExperimentScenarioRegistry.find(scenarioId).orElse(null);
+        if (scenario == null) {
+            context.getSource().sendFailure(Component.translatable("message.ai-partner.experiment.unknown", scenarioId));
+            return 0;
+        }
+        cancelPendingRequest(player.getUUID());
+        ExperimentScenarioService.Result result = ExperimentScenarioService.reset(player, scenario);
+        if (!result.successful()) {
+            context.getSource().sendFailure(Component.translatable(
+                    "message.ai-partner.experiment.failed",
+                    result.error()
+            ));
+            return 0;
+        }
+        ExperimentSessionRegistry.Context active = result.context();
+        context.getSource().sendSuccess(
+                () -> Component.translatable(
+                        "message.ai-partner.experiment.reset",
+                        scenario.id(),
+                        active.episodeId().toString(),
+                        scenario.instruction(),
+                        scenario.expectedOutcome(),
+                        active.anchor().getX(),
+                        active.anchor().getY(),
+                        active.anchor().getZ()
+                ),
+                true
+        );
+        return 1;
+    }
+
+    private static int disturbExperimentScenario(
+            CommandContext<CommandSourceStack> context
+    ) throws CommandSyntaxException {
+        ExperimentScenarioService.Result result = ExperimentScenarioService.disturb(
+                context.getSource().getPlayerOrException()
+        );
+        if (!result.successful()) {
+            context.getSource().sendFailure(Component.translatable(
+                    "message.ai-partner.experiment.failed",
+                    result.error()
+            ));
+            return 0;
+        }
+        context.getSource().sendSuccess(
+                () -> Component.translatable("message.ai-partner.experiment.disturbed", result.scenario().id()),
+                true
+        );
+        return 1;
+    }
+
+    private static int showExperimentContext(
+            CommandContext<CommandSourceStack> context
+    ) throws CommandSyntaxException {
+        ExperimentSessionRegistry.Context active = ExperimentSessionRegistry.current(
+                context.getSource().getPlayerOrException()
+        ).orElse(null);
+        if (active == null) {
+            context.getSource().sendFailure(Component.translatable("message.ai-partner.experiment.no_context"));
+            return 0;
+        }
+        context.getSource().sendSuccess(
+                () -> Component.translatable(
+                        "message.ai-partner.experiment.context",
+                        active.batchId(),
+                        active.episodeId().toString(),
+                        active.scenarioId(),
+                        active.expectedOutcome(),
+                        active.worldSeed()
+                ),
+                false
+        );
+        return 1;
+    }
+
+    private static int clearExperimentContext(
+            CommandContext<CommandSourceStack> context
+    ) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        ExperimentSessionRegistry.Context active = ExperimentSessionRegistry.current(player).orElse(null);
+        if (active != null) {
+            ExperimentLogger.getInstance().logScenarioEvent("scenario_context_cleared", player, active, "CLEARED");
+        }
+        ExperimentSessionRegistry.clear(player);
+        context.getSource().sendSuccess(
+                () -> Component.translatable("message.ai-partner.experiment.cleared"),
+                false
+        );
+        return 1;
+    }
+
+    private static int exportOfflineEvaluation(CommandContext<CommandSourceStack> context) {
+        try {
+            OfflineEvaluationService.ExportReport report = OfflineEvaluationService.exportAndEvaluateRuleBaseline();
+            context.getSource().sendSuccess(
+                    () -> Component.translatable(
+                            "message.ai-partner.experiment.evaluation_exported",
+                            report.metrics().total(),
+                            report.metrics().exactMatches(),
+                            String.format(java.util.Locale.ROOT, "%.3f", report.metrics().exactMatchAccuracy()),
+                            report.datasetPath().toAbsolutePath().toString(),
+                            report.predictionPath().toAbsolutePath().toString(),
+                            report.metricsPath().toAbsolutePath().toString()
+                    ),
+                    false
+            );
+            return 1;
+        } catch (java.io.IOException | RuntimeException exception) {
+            AiPartnerMod.LOGGER.error("Failed to export AI Partner offline evaluation", exception);
+            context.getSource().sendFailure(Component.translatable(
+                    "message.ai-partner.experiment.failed",
+                    exception.getClass().getSimpleName()
+            ));
+            return 0;
+        }
+    }
+
     private static int runBasicJob(CommandContext<CommandSourceStack> context, JobType type) throws CommandSyntaxException {
         cancelPendingRequest(context.getSource().getPlayerOrException().getUUID());
         return compileAndRun(context, JobSpec.basic(type), type.name().toLowerCase());
@@ -201,6 +377,20 @@ public final class MaidCommand {
                 context,
                 new JobSpec(JobType.DEPOSIT_ITEM, item, quantity, radius),
                 "deposit " + item + " " + quantity + " " + radius
+        );
+    }
+
+    private static int runCollectAndDepositJob(
+            CommandContext<CommandSourceStack> context,
+            int radius
+    ) throws CommandSyntaxException {
+        cancelPendingRequest(context.getSource().getPlayerOrException().getUUID());
+        String block = StringArgumentType.getString(context, "block");
+        int quantity = IntegerArgumentType.getInteger(context, "quantity");
+        return compileAndRun(
+                context,
+                new JobSpec(JobType.COLLECT_AND_DEPOSIT, block, quantity, radius),
+                "collect-and-deposit " + block + " " + quantity + " " + radius
         );
     }
 
@@ -379,7 +569,7 @@ public final class MaidCommand {
             case CANCEL -> "message.ai-partner.cancelled";
             case COLLECT_BLOCK -> "message.ai-partner.collecting";
             case DEPOSIT_ITEM -> "message.ai-partner.depositing";
-            default -> decision.messageKey();
+            case COLLECT_AND_DEPOSIT -> "message.ai-partner.collecting_and_depositing";
         };
     }
 

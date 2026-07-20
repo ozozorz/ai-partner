@@ -6,6 +6,7 @@ import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.job.AllowedTargets;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Objects;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -25,7 +26,9 @@ public final class CollectBlockExecutor {
     private static final double INTERACTION_DISTANCE_SQUARED = 9.0;
 
     private final AiPartnerEntity partner;
+    private final TaskExecutionListener defaultListener;
     private final Set<Long> unavailableTargets = new HashSet<>();
+    private TaskExecutionListener resultListener;
     private State state = State.IDLE;
     private TaskContract contract;
     private Block targetBlock;
@@ -41,29 +44,54 @@ public final class CollectBlockExecutor {
 
     public CollectBlockExecutor(AiPartnerEntity partner) {
         this.partner = partner;
+        this.defaultListener = TaskExecutionListener.activeContract(partner);
+        this.resultListener = defaultListener;
     }
 
     /**
      * 用已验证契约初始化执行器；非法目标会以内部故障安全终止。
      */
     public void start(TaskContract taskContract) {
-        start(taskContract, null);
+        start(taskContract, null, defaultListener);
+    }
+
+    /**
+     * 使用自定义阶段监听器启动，供固定组合任务复用采集状态机。
+     */
+    public void start(TaskContract taskContract, TaskExecutionListener listener) {
+        start(taskContract, null, listener);
     }
 
     /**
      * 从服务器存档恢复任务时沿用原始背包基线，避免重启后重复收集完整数量。
      */
     public void restore(TaskContract taskContract, int savedInitialTargetCount) {
-        start(taskContract, savedInitialTargetCount);
+        start(taskContract, savedInitialTargetCount, defaultListener);
     }
 
-    private void start(TaskContract taskContract, Integer initialCountOverride) {
+    /**
+     * 使用保存的背包基线和自定义监听器恢复组合任务采集阶段。
+     */
+    public void restore(
+            TaskContract taskContract,
+            int savedInitialTargetCount,
+            TaskExecutionListener listener
+    ) {
+        start(taskContract, savedInitialTargetCount, listener);
+    }
+
+    private void start(
+            TaskContract taskContract,
+            Integer initialCountOverride,
+            TaskExecutionListener listener
+    ) {
         stop();
+        this.resultListener = Objects.requireNonNull(listener, "listener");
         this.contract = taskContract;
         this.targetBlock = AllowedTargets.resolveCollectibleBlock(taskContract.job().target()).orElse(null);
         this.targetItem = targetBlock == null ? null : AllowedTargets.asCollectibleItem(targetBlock).orElse(null);
         if (targetBlock == null || targetItem == null) {
-            partner.failActiveContract(FailureCode.INTERNAL_ERROR);
+            resultListener.onFailed(FailureCode.INTERNAL_ERROR);
             return;
         }
         this.origin = partner.blockPosition().immutable();
@@ -96,7 +124,7 @@ public final class CollectBlockExecutor {
         }
         if (goalSatisfied()) {
             transitionTo(State.COMPLETE);
-            partner.completeActiveContract();
+            resultListener.onCompleted();
             return;
         }
 
@@ -131,6 +159,7 @@ public final class CollectBlockExecutor {
         pathFailures = 0;
         deadlineGameTime = 0L;
         unavailableTargets.clear();
+        resultListener = defaultListener;
     }
 
     /**
@@ -283,7 +312,7 @@ public final class CollectBlockExecutor {
     private void checkGoal() {
         if (goalSatisfied()) {
             transitionTo(State.COMPLETE);
-            partner.completeActiveContract();
+            resultListener.onCompleted();
         } else {
             transitionTo(State.SEARCH_TARGET);
         }
@@ -318,7 +347,7 @@ public final class CollectBlockExecutor {
 
     private void fail(FailureCode failureCode) {
         transitionTo(State.FAILED);
-        partner.failActiveContract(failureCode);
+        resultListener.onFailed(failureCode);
     }
 
     private void transitionTo(State nextState) {

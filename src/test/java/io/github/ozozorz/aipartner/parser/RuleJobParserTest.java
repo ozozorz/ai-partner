@@ -38,8 +38,26 @@ class RuleJobParserTest {
     }
 
     @Test
+    void parsesFixedChineseCollectAndDepositInstructionBeforeDeposit() {
+        JobSpec result = RuleJobParser.parse("帮我砍 8 个云杉原木，然后放进箱子").orElseThrow();
+
+        assertEquals(JobType.COLLECT_AND_DEPOSIT, result.type());
+        assertEquals("minecraft:spruce_log", result.target());
+        assertEquals(8, result.quantity());
+        assertEquals(16, result.radius());
+    }
+
+    @Test
+    void separatesQuantityFromExplicitRadius() {
+        JobSpec result = RuleJobParser.parse("在 24 格范围内收集 1 个云杉原木").orElseThrow();
+
+        assertEquals(JobType.COLLECT_BLOCK, result.type());
+        assertEquals(1, result.quantity());
+        assertEquals(24, result.radius());
+    }
+
+    @Test
     void ambiguousCollectionNeedsClarification() {
         assertTrue(RuleJobParser.parse("帮我弄一些木头").isEmpty());
     }
 }
-
