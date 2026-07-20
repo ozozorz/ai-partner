@@ -1,0 +1,11 @@
+.gradle/
+.gradle-user-home/
+build/
+run/
+logs/
+*.iml
+.idea/
+.vscode/
+
+# Runtime configuration may contain local endpoints or secrets.
+config/ai-partner.json

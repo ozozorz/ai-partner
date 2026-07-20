@@ -1,0 +1,25 @@
+package io.github.ozozorz.aipartner.contract;
+
+/**
+ * 把验证与运行时故障归一化，便于实验统计和一致性回复。
+ */
+public enum FailureCode {
+    NONE,
+    PARTNER_NOT_FOUND,
+    PARTNER_DIED,
+    OWNER_OFFLINE,
+    DIFFERENT_DIMENSION,
+    TARGET_NOT_FOUND,
+    TARGET_DISAPPEARED,
+    PATH_UNREACHABLE,
+    MISSING_TOOL,
+    MISSING_ITEM,
+    INVENTORY_FULL,
+    CONTAINER_FULL,
+    PERMISSION_DENIED,
+    INVALID_PARAMETER,
+    UNSUPPORTED_JOB,
+    TIMEOUT,
+    CANCELLED_BY_PLAYER,
+    INTERNAL_ERROR
+}

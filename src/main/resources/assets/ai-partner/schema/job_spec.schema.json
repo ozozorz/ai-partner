@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ozozorz/ai-partner/schema/job_spec.schema.json",
+  "title": "AI Partner candidate response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dialogue_act",
+    "candidate_job",
+    "clarification_question"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "dialogue_act": {
+      "enum": [
+        "PROPOSE_JOB",
+        "ASK_CLARIFICATION",
+        "REJECT_UNSUPPORTED",
+        "SOCIAL_REPLY"
+      ]
+    },
+    "candidate_job": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/job"
+        }
+      ]
+    },
+    "clarification_question": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": [
+            "FOLLOW",
+            "STAY",
+            "COLLECT_BLOCK",
+            "DEPOSIT_ITEM",
+            "COLLECT_AND_DEPOSIT",
+            "CANCEL"
+          ]
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "radius": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 24
+        }
+      }
+    }
+  }
+}
+

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "ai-partner",
+  "version": "${version}",
+  "name": "AI Partner",
+  "description": "A reliable LLM-driven maid companion for Minecraft, built around Instruction-Behavior Contracts.",
+  "authors": [
+    "ozozorz"
+  ],
+  "contact": {
+    "sources": "https://github.com/ozozorz/ai-partner",
+    "issues": "https://github.com/ozozorz/ai-partner/issues"
+  },
+  "license": "All-Rights-Reserved",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "io.github.ozozorz.aipartner.AiPartnerMod"
+    ],
+    "client": [
+      "io.github.ozozorz.aipartner.client.AiPartnerClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~26.1.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
+
