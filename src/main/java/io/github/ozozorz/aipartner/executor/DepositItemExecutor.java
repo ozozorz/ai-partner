@@ -107,6 +107,15 @@ public final class DepositItemExecutor {
         return state != State.IDLE && state != State.COMPLETE && state != State.FAILED && contract != null;
     }
 
+    /**
+     * 主人操作背包时暂停超时计时，使 UI 检查和物品调整不会消耗任务预算。
+     */
+    public void pauseForMenuTick() {
+        if (isRunning()) {
+            deadlineGameTime++;
+        }
+    }
+
     public int movedCount() {
         return movedCount;
     }
@@ -343,4 +352,3 @@ public final class DepositItemExecutor {
         FAILED
     }
 }
-

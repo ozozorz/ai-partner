@@ -1,12 +1,11 @@
 {
-  "llmEnabled": false,
-  "endpoint": "http://127.0.0.1:11434/v1/chat/completions",
-  "model": "configure-me",
-  "apiKeyEnvironmentVariable": "AI_PARTNER_API_KEY",
-  "timeoutSeconds": 20,
+  "llmEnabled": true,
+  "endpoint": "https://api.deepseek.com/chat/completions",
+  "model": "deepseek-v4-flash",
+  "apiKeyEnvironmentVariable": "DEEPSEEK_API_KEY",
+  "timeoutSeconds": 30,
   "maxRetries": 1,
   "maxOutputTokens": 512,
   "temperature": 0.0,
   "requestJsonResponseFormat": true
 }
-

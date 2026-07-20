@@ -27,11 +27,11 @@ public record AiPartnerConfig(
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("ai-partner.json");
     private static final AiPartnerConfig DEFAULT = new AiPartnerConfig(
-            false,
-            "http://127.0.0.1:11434/v1/chat/completions",
-            "configure-me",
-            "AI_PARTNER_API_KEY",
-            20,
+            true,
+            "https://api.deepseek.com/chat/completions",
+            "deepseek-v4-flash",
+            "DEEPSEEK_API_KEY",
+            30,
             1,
             512,
             0.0,
@@ -58,12 +58,17 @@ public record AiPartnerConfig(
     private static AiPartnerConfig load() {
         try {
             if (!Files.exists(CONFIG_PATH)) {
-                Files.createDirectories(CONFIG_PATH.getParent());
-                Files.writeString(CONFIG_PATH, GSON.toJson(DEFAULT) + System.lineSeparator(), StandardCharsets.UTF_8);
+                writeConfig(DEFAULT);
                 return DEFAULT;
             }
             AiPartnerConfig loaded = GSON.fromJson(Files.readString(CONFIG_PATH, StandardCharsets.UTF_8), AiPartnerConfig.class);
-            return validate(loaded);
+            AiPartnerConfig validated = validate(loaded);
+            if (isLegacyPlaceholder(validated) && hasEnvironmentVariable(DEFAULT.apiKeyEnvironmentVariable())) {
+                AiPartnerMod.LOGGER.info("Migrating unconfigured AI Partner LLM settings to DeepSeek");
+                writeConfig(DEFAULT);
+                return DEFAULT;
+            }
+            return validated;
         } catch (IOException | RuntimeException exception) {
             AiPartnerMod.LOGGER.error("Failed to load config/ai-partner.json; LLM integration is disabled", exception);
             return DEFAULT;
@@ -100,7 +105,37 @@ public record AiPartnerConfig(
      * 判断配置是否明确启用且已填写模型名称。
      */
     public boolean isLlmReady() {
-        return llmEnabled && !model.isBlank() && !"configure-me".equals(model);
+        if (!llmEnabled || model.isBlank() || "configure-me".equals(model)) {
+            return false;
+        }
+        URI endpointUri = URI.create(endpoint);
+        String host = endpointUri.getHost();
+        boolean localEndpoint = host == null
+                || "localhost".equalsIgnoreCase(host)
+                || "127.0.0.1".equals(host)
+                || "::1".equals(host);
+        return localEndpoint
+                || apiKeyEnvironmentVariable.isBlank()
+                || hasEnvironmentVariable(apiKeyEnvironmentVariable);
+    }
+
+    /**
+     * 判断指定环境变量是否存在；只检查存在性，不读取、记录或写入密钥内容。
+     */
+    public static boolean hasEnvironmentVariable(String variableName) {
+        String value = System.getenv(variableName);
+        return value != null && !value.isBlank();
+    }
+
+    private static boolean isLegacyPlaceholder(AiPartnerConfig config) {
+        return !config.llmEnabled()
+                && "http://127.0.0.1:11434/v1/chat/completions".equals(config.endpoint())
+                && "configure-me".equals(config.model())
+                && "AI_PARTNER_API_KEY".equals(config.apiKeyEnvironmentVariable());
+    }
+
+    private static void writeConfig(AiPartnerConfig config) throws IOException {
+        Files.createDirectories(CONFIG_PATH.getParent());
+        Files.writeString(CONFIG_PATH, GSON.toJson(config) + System.lineSeparator(), StandardCharsets.UTF_8);
     }
 }
-

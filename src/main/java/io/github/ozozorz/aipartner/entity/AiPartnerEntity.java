@@ -5,8 +5,11 @@ import io.github.ozozorz.aipartner.contract.FailureCode;
 import io.github.ozozorz.aipartner.contract.JobSpec;
 import io.github.ozozorz.aipartner.contract.TaskContract;
 import io.github.ozozorz.aipartner.entity.goal.AiPartnerFollowOwnerGoal;
+import io.github.ozozorz.aipartner.entity.goal.AiPartnerIdleWanderGoal;
+import io.github.ozozorz.aipartner.entity.navigation.AiPartnerPathNavigation;
 import io.github.ozozorz.aipartner.executor.CollectBlockExecutor;
 import io.github.ozozorz.aipartner.executor.DepositItemExecutor;
+import io.github.ozozorz.aipartner.inventory.AiPartnerMenu;
 import io.github.ozozorz.aipartner.job.JobType;
 import io.github.ozozorz.aipartner.logging.ExperimentLogger;
 import java.util.Optional;
@@ -20,26 +23,36 @@ import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.tags.ItemTags;
+import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.AgeableMob;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
+import net.minecraft.world.entity.ai.goal.OpenDoorGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
+import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.InventoryCarrier;
 import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.equipment.Equippable;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
@@ -48,19 +61,20 @@ import org.jspecify.annotations.Nullable;
 /**
  * 服务端权威的女仆伙伴实体；客户端只读取同步模式并负责表现。
  */
-public final class AiPartnerEntity extends TamableAnimal implements InventoryCarrier {
+public final class AiPartnerEntity extends TamableAnimal implements InventoryCarrier, ExtendedMenuProvider<Integer> {
     private static final EntityDataAccessor<Integer> DATA_MODE = SynchedEntityData.defineId(
             AiPartnerEntity.class,
             EntityDataSerializers.INT
     );
 
     private @Nullable TaskContract currentContract;
-    private final SimpleContainer inventory = new SimpleContainer(18);
+    private final SimpleContainer inventory = new SimpleContainer(AiPartnerMenu.STORAGE_SLOT_COUNT);
     private final CollectBlockExecutor collectBlockExecutor = new CollectBlockExecutor(this);
     private final DepositItemExecutor depositItemExecutor = new DepositItemExecutor(this);
     private int collectInitialTargetCount;
     private int depositMovedCount;
     private String currentSystemVariant = "RULE_BT";
+    private boolean inventoryMenuOpen;
 
     public AiPartnerEntity(EntityType<? extends AiPartnerEntity> entityType, Level level) {
         super(entityType, level);
@@ -81,8 +95,18 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     protected void registerGoals() {
         goalSelector.addGoal(0, new FloatGoal(this));
         goalSelector.addGoal(1, new AiPartnerFollowOwnerGoal(this, 1.05, 5.0F, 3.0F));
-        goalSelector.addGoal(5, new LookAtPlayerGoal(this, Player.class, 8.0F));
-        goalSelector.addGoal(6, new RandomLookAroundGoal(this));
+        goalSelector.addGoal(2, new OpenDoorGoal(this, true));
+        goalSelector.addGoal(6, new AiPartnerIdleWanderGoal(this, 0.65));
+        goalSelector.addGoal(7, new LookAtPlayerGoal(this, Player.class, 8.0F, 0.035F));
+        goalSelector.addGoal(8, new RandomLookAroundGoal(this));
+    }
+
+    /**
+     * 使用支持开门、过门和漂浮的核心导航器，供跟随与所有确定性任务共用。
+     */
+    @Override
+    protected PathNavigation createNavigation(Level level) {
+        return new AiPartnerPathNavigation(this, level);
     }
 
     @Override
@@ -196,6 +220,41 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
 
     public Optional<TaskContract> getCurrentContract() {
         return Optional.ofNullable(currentContract);
+    }
+
+    /**
+     * 判断当前是否允许空闲漫步；工作、待命、跟随或打开背包时均不会随机移动。
+     */
+    public boolean canUseAmbientMovement() {
+        return !inventoryMenuOpen
+                && getMode() == PartnerMode.IDLE
+                && (currentContract == null || currentContract.status().isTerminal());
+    }
+
+    /**
+     * 返回主人是否正在操作女仆背包，用于暂停导航而不改变任务契约。
+     */
+    public boolean isInventoryMenuOpen() {
+        return inventoryMenuOpen;
+    }
+
+    /**
+     * 菜单打开时停止当前路径，防止女仆走出玩家可交互范围。
+     */
+    public void onInventoryMenuOpened(Player player) {
+        if (!level().isClientSide() && isOwnedBy(player)) {
+            inventoryMenuOpen = true;
+            navigation.stop();
+        }
+    }
+
+    /**
+     * 主人关闭菜单后恢复由当前模式决定的行为调度。
+     */
+    public void onInventoryMenuClosed(Player player) {
+        if (!level().isClientSide() && isOwnedBy(player)) {
+            inventoryMenuOpen = false;
+        }
     }
 
     /**
@@ -337,6 +396,11 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     @Override
     public void tick() {
         super.tick();
+        if (!level().isClientSide() && inventoryMenuOpen) {
+            collectBlockExecutor.pauseForMenuTick();
+            depositItemExecutor.pauseForMenuTick();
+            return;
+        }
         if (!level().isClientSide()
                 && getMode() == PartnerMode.COLLECTING
                 && currentContract != null
@@ -375,13 +439,16 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         }
         if (isOwnedBy(player)) {
             ItemStack heldItem = player.getItemInHand(hand);
-            if (player.isShiftKeyDown() && !heldItem.isEmpty()) {
+            if (player.isShiftKeyDown()) {
                 if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
-                    if (currentContract != null && currentContract.status() == ContractStatus.RUNNING) {
-                        serverPlayer.sendSystemMessage(Component.translatable("message.ai-partner.inventory_busy"));
-                    } else {
-                        transferHeldItem(serverPlayer, heldItem);
-                    }
+                    serverPlayer.openMenu(this);
+                }
+                return level().isClientSide() ? InteractionResult.SUCCESS : InteractionResult.SUCCESS_SERVER;
+            }
+            Equippable equippable = heldItem.get(DataComponents.EQUIPPABLE);
+            if (equippable != null && equippable.slot().getType() == EquipmentSlot.Type.HUMANOID_ARMOR) {
+                if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    equipArmorFromPlayer(serverPlayer, heldItem, equippable);
                 }
                 return level().isClientSide() ? InteractionResult.SUCCESS : InteractionResult.SUCCESS_SERVER;
             }
@@ -395,23 +462,58 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         return super.mobInteract(player, hand);
     }
 
-    private void transferHeldItem(ServerPlayer player, ItemStack heldItem) {
-        int originalCount = heldItem.getCount();
-        Component itemName = heldItem.getHoverName();
-        ItemStack remainder = inventory.addItem(heldItem.copy());
-        int inserted = originalCount - remainder.getCount();
-        if (inserted <= 0) {
-            player.sendSystemMessage(Component.translatable("message.ai-partner.inventory_full"));
+    /**
+     * 把玩家手中的一件护甲直接装备到对应槽位，旧护甲安全归还玩家。
+     */
+    private void equipArmorFromPlayer(ServerPlayer player, ItemStack heldItem, Equippable equippable) {
+        EquipmentSlot slot = equippable.slot();
+        if (!isEquippableInSlot(heldItem, slot)) {
+            player.sendSystemMessage(Component.translatable("message.ai-partner.armor_not_compatible"));
             return;
         }
+        ItemStack previous = getItemBySlot(slot);
+        if (!previous.isEmpty()
+                && !player.isCreative()
+                && EnchantmentHelper.has(previous, EnchantmentEffectComponents.PREVENT_ARMOR_CHANGE)) {
+            player.sendSystemMessage(Component.translatable("message.ai-partner.armor_cannot_remove"));
+            return;
+        }
+
+        ItemStack equipped = heldItem.copyWithCount(1);
         if (!player.getAbilities().instabuild) {
-            heldItem.shrink(inserted);
+            heldItem.shrink(1);
+        }
+        setItemSlot(slot, equipped);
+        setGuaranteedDrop(slot);
+        setPersistenceRequired();
+        if (!previous.isEmpty()) {
+            player.getInventory().placeItemBackInInventory(previous);
         }
         player.sendSystemMessage(Component.translatable(
-                "message.ai-partner.item_received",
-                inserted,
-                itemName
+                "message.ai-partner.armor_equipped",
+                equipped.getHoverName()
         ));
+    }
+
+    @Override
+    public Component getDisplayName() {
+        return hasCustomName() ? getName() : Component.translatable("container.ai-partner.inventory");
+    }
+
+    /**
+     * 仅允许主人创建连接真实实体物品栏的服务端菜单。
+     */
+    @Override
+    public @Nullable AbstractContainerMenu createMenu(int containerId, Inventory playerInventory, Player player) {
+        return isAlive() && isOwnedBy(player) ? new AiPartnerMenu(containerId, playerInventory, this) : null;
+    }
+
+    /**
+     * 把实体编号发送给客户端菜单工厂，以解析要展示的具体女仆。
+     */
+    @Override
+    public Integer getScreenOpeningData(ServerPlayer player) {
+        return getId();
     }
 
     @Override

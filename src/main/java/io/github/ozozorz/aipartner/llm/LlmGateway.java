@@ -135,7 +135,20 @@ public final class LlmGateway {
             responseFormat.addProperty("type", "json_object");
             request.add("response_format", responseFormat);
         }
+        if (isDeepSeekEndpoint()) {
+            JsonObject thinking = new JsonObject();
+            thinking.addProperty("type", "disabled");
+            request.add("thinking", thinking);
+        }
         return AiPartnerJson.GSON.toJson(request);
+    }
+
+    /**
+     * DeepSeek 的指令解析请求显式关闭思考模式，以降低 UI 指令延迟并保持 JSON 输出简洁。
+     */
+    private boolean isDeepSeekEndpoint() {
+        String host = URI.create(config.endpoint()).getHost();
+        return host != null && (host.equalsIgnoreCase("api.deepseek.com") || host.endsWith(".deepseek.com"));
     }
 
     private LlmCallResult decodeResponse(HttpResponse<String> response, long latencyMillis) {

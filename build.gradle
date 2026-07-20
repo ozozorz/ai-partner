@@ -30,11 +30,13 @@ dependencies {
 	testRuntimeOnly "org.junit.platform:junit-platform-launcher:1.11.4"
 }
 
+def expandedModVersion = version
+
 processResources {
-	inputs.property "version", project.version
+	inputs.property "version", expandedModVersion
 
 	filesMatching("fabric.mod.json") {
-		expand "version": project.version
+		expand "version": expandedModVersion
 	}
 }
 

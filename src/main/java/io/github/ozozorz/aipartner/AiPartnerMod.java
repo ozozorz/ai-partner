@@ -4,6 +4,7 @@ import io.github.ozozorz.aipartner.command.MaidCommand;
 import io.github.ozozorz.aipartner.llm.LlmGateway;
 import io.github.ozozorz.aipartner.logging.ExperimentLogger;
 import io.github.ozozorz.aipartner.registry.ModEntities;
+import io.github.ozozorz.aipartner.registry.ModMenus;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.resources.Identifier;
@@ -20,6 +21,7 @@ public final class AiPartnerMod implements ModInitializer {
     @Override
     public void onInitialize() {
         ModEntities.register();
+        ModMenus.register();
         MaidCommand.register();
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> ExperimentLogger.getInstance().flush());
         LOGGER.info(

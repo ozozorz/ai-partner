@@ -11,9 +11,15 @@ import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.level.pathfinder.PathType;
 
 /**
- * 仅在 FOLLOW 契约运行时工作的有限重试跟随目标。
+ * 仅在 FOLLOW 契约运行时工作的主人跟随目标。
+ *
+ * <p>使用启停距离滞回、周期性重算与延迟传送，避免紧贴主人、频繁抖动或一超距就瞬移。</p>
  */
 public final class AiPartnerFollowOwnerGoal extends Goal {
+    private static final int PATH_RECALCULATION_TICKS = 10;
+    private static final int TELEPORT_AFTER_STALLED_TICKS = 60;
+    private static final double TELEPORT_DISTANCE_SQUARED = 144.0;
+
     private final AiPartnerEntity partner;
     private final PathNavigation navigation;
     private final double speedModifier;
@@ -21,7 +27,9 @@ public final class AiPartnerFollowOwnerGoal extends Goal {
     private final float stopDistance;
     private LivingEntity owner;
     private int ticksUntilPathRecalculation;
-    private int consecutiveFailures;
+    private int stalledTicks;
+    private int teleportFailures;
+    private double lastMeasuredDistanceSquared;
     private float oldWaterCost;
 
     public AiPartnerFollowOwnerGoal(
@@ -44,7 +52,10 @@ public final class AiPartnerFollowOwnerGoal extends Goal {
     @Override
     public boolean canUse() {
         LivingEntity currentOwner = partner.getOwner();
-        if (!partner.isFollowing() || currentOwner == null || !currentOwner.isAlive()) {
+        if (!partner.isFollowing()
+                || partner.isInventoryMenuOpen()
+                || currentOwner == null
+                || !currentOwner.isAlive()) {
             return false;
         }
         if (partner.distanceToSqr(currentOwner) < startDistance * startDistance) {
@@ -57,6 +68,7 @@ public final class AiPartnerFollowOwnerGoal extends Goal {
     @Override
     public boolean canContinueToUse() {
         return partner.isFollowing()
+                && !partner.isInventoryMenuOpen()
                 && owner != null
                 && owner.isAlive()
                 && partner.distanceToSqr(owner) > stopDistance * stopDistance;
@@ -65,7 +77,9 @@ public final class AiPartnerFollowOwnerGoal extends Goal {
     @Override
     public void start() {
         ticksUntilPathRecalculation = 0;
-        consecutiveFailures = 0;
+        stalledTicks = 0;
+        teleportFailures = 0;
+        lastMeasuredDistanceSquared = owner == null ? 0.0 : partner.distanceToSqr(owner);
         oldWaterCost = partner.getPathfindingMalus(PathType.WATER);
         partner.setPathfindingMalus(PathType.WATER, 0.0F);
     }
@@ -87,21 +101,30 @@ public final class AiPartnerFollowOwnerGoal extends Goal {
             return;
         }
 
-        ticksUntilPathRecalculation = adjustedTickDelay(10);
-        if (partner.shouldTryTeleportToOwner()) {
-            double distanceBeforeTeleport = partner.distanceToSqr(owner);
-            partner.tryToTeleportToOwner();
-            recordAttempt(partner.distanceToSqr(owner) < distanceBeforeTeleport);
-        } else {
-            recordAttempt(navigation.moveTo(owner, speedModifier));
+        ticksUntilPathRecalculation = adjustedTickDelay(PATH_RECALCULATION_TICKS);
+        double distanceSquared = partner.distanceToSqr(owner);
+        if (distanceSquared + 0.25 < lastMeasuredDistanceSquared) {
+            stalledTicks = 0;
+        } else if (navigation.isDone() || navigation.isStuck()) {
+            stalledTicks += PATH_RECALCULATION_TICKS;
         }
-    }
+        lastMeasuredDistanceSquared = distanceSquared;
 
-    private void recordAttempt(boolean successful) {
-        consecutiveFailures = successful ? 0 : consecutiveFailures + 1;
-        if (consecutiveFailures > partner.getMaximumLocalRetries()) {
-            partner.failActiveContract(FailureCode.PATH_UNREACHABLE);
+        if (distanceSquared >= TELEPORT_DISTANCE_SQUARED && stalledTicks >= TELEPORT_AFTER_STALLED_TICKS) {
+            double distanceBeforeTeleport = distanceSquared;
+            partner.tryToTeleportToOwner();
+            if (partner.distanceToSqr(owner) < distanceBeforeTeleport) {
+                stalledTicks = 0;
+                teleportFailures = 0;
+            } else if (++teleportFailures > partner.getMaximumLocalRetries()) {
+                partner.failActiveContract(FailureCode.PATH_UNREACHABLE);
+            }
+            return;
+        }
+
+        double adjustedSpeed = distanceSquared > 100.0 ? speedModifier * 1.2 : speedModifier;
+        if (!navigation.moveTo(owner, adjustedSpeed)) {
+            stalledTicks += PATH_RECALCULATION_TICKS;
         }
     }
 }
-

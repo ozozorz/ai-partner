@@ -1,22 +1,48 @@
 package io.github.ozozorz.aipartner.client.render;
 
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
+import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.model.player.PlayerModel;
+import net.minecraft.client.renderer.entity.ArmorModelSet;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
-import net.minecraft.client.renderer.entity.MobRenderer;
+import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.item.ItemStack;
 
 /**
- * 临时复用 Minecraft 内置 Alex 瘦手臂模型和官方贴图的女仆渲染器。
+ * 使用 Minecraft 内置 Alex 瘦臂模型、官方皮肤、手持物层和护甲层渲染 AI 女仆。
  */
-public final class AiPartnerRenderer extends MobRenderer<AiPartnerEntity, AvatarRenderState, PlayerModel> {
-    private static final Identifier ALEX_TEXTURE = Identifier.withDefaultNamespace("entity/player/slim/alex");
+public final class AiPartnerRenderer
+        extends HumanoidMobRenderer<AiPartnerEntity, AvatarRenderState, PlayerModel> {
+    // Renderer 需要最终纹理路径，而非 DefaultPlayerSkin 使用的逻辑资源 ID。
+    private static final Identifier ALEX_TEXTURE = Identifier.withDefaultNamespace(
+            "textures/entity/player/slim/alex.png"
+    );
 
     public AiPartnerRenderer(EntityRendererProvider.Context context) {
         super(context, new PlayerModel(context.bakeLayer(ModelLayers.PLAYER_SLIM), true), 0.35F);
+        addLayer(new HumanoidArmorLayer<>(
+                this,
+                ArmorModelSet.bake(
+                        ModelLayers.PLAYER_SLIM_ARMOR,
+                        context.getModelSet(),
+                        modelPart -> new PlayerModel(modelPart, true)
+                ),
+                context.getEquipmentRenderer()
+        ));
+    }
+
+    @Override
+    protected HumanoidModel.ArmPose getArmPose(AiPartnerEntity partner, HumanoidArm arm) {
+        HumanoidModel.ArmPose specializedPose = super.getArmPose(partner, arm);
+        ItemStack heldItem = partner.getItemHeldByArm(arm);
+        return specializedPose == HumanoidModel.ArmPose.EMPTY && !heldItem.isEmpty()
+                ? HumanoidModel.ArmPose.ITEM
+                : specializedPose;
     }
 
     @Override
@@ -27,7 +53,6 @@ public final class AiPartnerRenderer extends MobRenderer<AiPartnerEntity, Avatar
     @Override
     public void extractRenderState(AiPartnerEntity entity, AvatarRenderState state, float partialTicks) {
         super.extractRenderState(entity, state, partialTicks);
-        HumanoidMobRenderer.extractHumanoidRenderState(entity, state, partialTicks, itemModelResolver);
         state.isSpectator = false;
         state.showHat = true;
         state.showJacket = true;
@@ -43,4 +68,3 @@ public final class AiPartnerRenderer extends MobRenderer<AiPartnerEntity, Avatar
         return ALEX_TEXTURE;
     }
 }
-
