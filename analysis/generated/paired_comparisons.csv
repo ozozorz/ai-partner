@@ -1,0 +1,4 @@
+﻿left_variant,right_variant,paired_episodes,left_only_passed,right_only_passed,episode_exact_mcnemar_p,both_passed,both_failed,paired_scenarios,scenario_positive,scenario_negative,scenario_ties,scenario_sign_test_p
+MAID_IBC,LLM_SCHEMA,54,6,0,0.03125,48,0,18,2,0,16,0.5
+MAID_IBC,RULE_BT,54,0,0,1.0,54,0,18,0,0,18,1.0
+MAID_IBC,MAID_IBC_A2_NO_RUNTIME_MONITORING,54,6,0,0.03125,48,0,18,2,0,16,0.5

@@ -1,0 +1,5 @@
+﻿system_variant,episodes,passed,failed,excluded,pass_rate,pass_rate_ci95_low,pass_rate_ci95_high,safety_rate,ibcr,mean_duration_ticks,median_duration_ticks,p95_duration_ticks,disturbance_episodes,episodes_with_runtime_recovery_attempt,recovered_disturbances,recoverable_target_change_passed,recoverable_target_change_total
+RULE_BT,54,54,0,0,1.0,0.9335864119091036,1.0000000000000002,1.0,1.0,145.62962962962962,27.5,712.8999999999924,9,9,9,3,3
+LLM_SCHEMA,54,48,6,0,0.8888888888888888,0.7780529897881872,0.9480697750300044,1.0,1.0,176.55555555555554,57.0,742.6499999999924,9,0,0,0,3
+MAID_IBC,54,54,0,0,1.0,0.9335864119091036,1.0000000000000002,1.0,1.0,179.46296296296296,59.5,740.5499999999925,9,9,9,3,3
+MAID_IBC_A2_NO_RUNTIME_MONITORING,54,48,6,0,0.8888888888888888,0.7780529897881872,0.9480697750300044,1.0,1.0,172.35185185185185,61.0,750.1499999999922,9,0,0,0,3

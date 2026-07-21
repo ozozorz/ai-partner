@@ -1,0 +1,13 @@
+﻿system_variant,scenario_id,repetition,expected_outcome,actual_outcome,goal_satisfied,safety_satisfied,ibc_consistent,runtime_recoveries,duration_ticks,episode_id
+LLM_SCHEMA,chest_removed_after_accept,1,TARGET_NOT_FOUND,TARGET_DISAPPEARED,False,True,True,0,40,b89fb046-9593-4428-8c29-4dd51118db0f
+LLM_SCHEMA,recoverable_target_change,1,COMPLETED_AFTER_RETRY,TARGET_DISAPPEARED,False,True,True,0,40,5cdd9750-9a11-478e-a76d-171a7c31767d
+LLM_SCHEMA,chest_removed_after_accept,2,TARGET_NOT_FOUND,TARGET_DISAPPEARED,False,True,True,0,43,5ee3eee1-cd49-4f54-b002-0e2aa7b4cc68
+LLM_SCHEMA,recoverable_target_change,2,COMPLETED_AFTER_RETRY,TARGET_DISAPPEARED,False,True,True,0,37,2f21ef9c-437c-4311-bd7b-ec559517bad6
+LLM_SCHEMA,chest_removed_after_accept,3,TARGET_NOT_FOUND,TARGET_DISAPPEARED,False,True,True,0,40,2f1f0c35-982f-4c9b-8300-ff5765b72d7f
+LLM_SCHEMA,recoverable_target_change,3,COMPLETED_AFTER_RETRY,TARGET_DISAPPEARED,False,True,True,0,48,6e327515-db8c-467a-b65c-83e035425c79
+MAID_IBC_A2_NO_RUNTIME_MONITORING,chest_removed_after_accept,1,TARGET_NOT_FOUND,TARGET_DISAPPEARED,False,True,True,0,71,b42f17bb-e423-4757-b21c-0c17eaa2bc07
+MAID_IBC_A2_NO_RUNTIME_MONITORING,recoverable_target_change,1,COMPLETED_AFTER_RETRY,TARGET_DISAPPEARED,False,True,True,0,44,b42736b4-356f-4baf-819b-8bb40e147204
+MAID_IBC_A2_NO_RUNTIME_MONITORING,chest_removed_after_accept,2,TARGET_NOT_FOUND,TARGET_DISAPPEARED,False,True,True,0,75,99a346ce-faf1-46f4-b5e4-0dcd4613de62
+MAID_IBC_A2_NO_RUNTIME_MONITORING,recoverable_target_change,2,COMPLETED_AFTER_RETRY,TARGET_DISAPPEARED,False,True,True,0,42,9c7ce66f-f530-4132-a39b-19b68be08dd0
+MAID_IBC_A2_NO_RUNTIME_MONITORING,chest_removed_after_accept,3,TARGET_NOT_FOUND,TARGET_DISAPPEARED,False,True,True,0,71,c28ea4b4-dfa4-4794-a9c4-f54934b47c73
+MAID_IBC_A2_NO_RUNTIME_MONITORING,recoverable_target_change,3,COMPLETED_AFTER_RETRY,TARGET_DISAPPEARED,False,True,True,0,42,9d407891-ce81-4de1-9272-10f573fb567f

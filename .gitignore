@@ -6,6 +6,8 @@ logs/
 *.iml
 .idea/
 .vscode/
+__pycache__/
+*.pyc
 
 # Runtime configuration may contain local endpoints or secrets.
 config/ai-partner.json
