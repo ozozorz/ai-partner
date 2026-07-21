@@ -12,7 +12,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.gamerules.GameRules;
 
@@ -21,7 +23,7 @@ import net.minecraft.world.level.gamerules.GameRules;
  */
 public final class CollectBlockExecutor {
     private static final int SEARCH_BUDGET_PER_TICK = 1024;
-    private static final int BREAK_DURATION_TICKS = 20;
+    private static final int BREAK_DURATION_TICKS = 16;
     private static final int PICKUP_TIMEOUT_TICKS = 60;
     private static final double INTERACTION_DISTANCE_SQUARED = 9.0;
 
@@ -122,7 +124,7 @@ public final class CollectBlockExecutor {
             fail(FailureCode.PERMISSION_DENIED);
             return;
         }
-        if (goalSatisfied()) {
+        if (partner.usesRuntimeMonitoring() && goalSatisfied()) {
             transitionTo(State.COMPLETE);
             resultListener.onCompleted();
             return;
@@ -224,8 +226,8 @@ public final class CollectBlockExecutor {
     }
 
     private void navigateToTarget(ServerLevel level) {
-        if (!targetStillExists(level)) {
-            retryWithAnotherTarget();
+        if (partner.usesRuntimeMonitoring() && !targetStillExists(level)) {
+            handleUnavailableTarget(FailureCode.TARGET_DISAPPEARED);
             return;
         }
         if (distanceToTargetSquared() <= INTERACTION_DISTANCE_SQUARED) {
@@ -245,14 +247,14 @@ public final class CollectBlockExecutor {
                 1.0
         );
         pathFailures = pathStarted ? 0 : pathFailures + 1;
-        if (pathFailures > contract.failurePolicy().maxLocalRetries()) {
-            retryWithAnotherTarget();
+        if (pathFailures > partner.getMaximumLocalRetries()) {
+            handleUnavailableTarget(FailureCode.PATH_UNREACHABLE);
         }
     }
 
     private void checkTarget(ServerLevel level) {
         if (!targetStillExists(level)) {
-            retryWithAnotherTarget();
+            handleUnavailableTarget(FailureCode.TARGET_DISAPPEARED);
             return;
         }
         if (distanceToTargetSquared() > INTERACTION_DISTANCE_SQUARED) {
@@ -273,7 +275,7 @@ public final class CollectBlockExecutor {
 
     private void breakTarget(ServerLevel level) {
         if (!targetStillExists(level)) {
-            retryWithAnotherTarget();
+            handleUnavailableTarget(FailureCode.TARGET_DISAPPEARED);
             return;
         }
         if (distanceToTargetSquared() > INTERACTION_DISTANCE_SQUARED) {
@@ -287,16 +289,32 @@ public final class CollectBlockExecutor {
             return;
         }
 
-        boolean destroyed = level.destroyBlock(targetPosition, true, partner, Block.UPDATE_LIMIT);
+        boolean destroyed = level.destroyBlock(targetPosition, false, partner, Block.UPDATE_LIMIT);
         if (!destroyed) {
-            retryWithAnotherTarget();
+            handleUnavailableTarget(FailureCode.PERMISSION_DENIED);
+            return;
+        }
+        ItemStack remainder = partner.getInventory().addItem(new ItemStack(targetItem));
+        if (!remainder.isEmpty()) {
+            level.addFreshEntity(new ItemEntity(
+                    level,
+                    targetPosition.getX() + 0.5,
+                    targetPosition.getY() + 0.5,
+                    targetPosition.getZ() + 0.5,
+                    remainder
+            ));
+            fail(FailureCode.INVENTORY_FULL);
             return;
         }
         transitionTo(State.PICK_UP);
     }
 
+    /**
+     * 验证服务器端原子采集已入包；这样可消除掉落实体寻路对跨系统实验的随机干扰。
+     */
     private void waitForPickup() {
         if (goalSatisfied() || partner.countItem(targetItem) > countBeforeBreak) {
+            partner.getNavigation().stop();
             transitionTo(State.CHECK_GOAL);
             return;
         }
@@ -305,7 +323,8 @@ public final class CollectBlockExecutor {
             return;
         }
         if (stateTicks >= PICKUP_TIMEOUT_TICKS) {
-            retryWithAnotherTarget();
+            partner.getNavigation().stop();
+            handleUnavailableTarget(FailureCode.TIMEOUT);
         }
     }
 
@@ -343,6 +362,18 @@ public final class CollectBlockExecutor {
         searchIterator = null;
         pathFailures = 0;
         transitionTo(State.SEARCH_TARGET);
+    }
+
+    /**
+     * 完整系统可重新搜索替代目标；LLM-Schema 与 A2 在动作级安全检查处直接失败。
+     */
+    private void handleUnavailableTarget(FailureCode failureCode) {
+        if (!partner.allowsLocalRecovery()) {
+            fail(failureCode);
+            return;
+        }
+        partner.recordRuntimeRecovery(failureCode.name());
+        retryWithAnotherTarget();
     }
 
     private void fail(FailureCode failureCode) {

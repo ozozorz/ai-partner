@@ -1,0 +1,30 @@
+{
+  "protocolVersion": "0.4",
+  "llmEnabled": true,
+  "endpoint": "https://api.deepseek.com/chat/completions",
+  "model": "deepseek-v4-flash",
+  "apiKeyEnvironmentVariable": "DEEPSEEK_API_KEY",
+  "temperature": 0.0,
+  "llmTimeoutSeconds": 30,
+  "taskTimeoutSeconds": 90,
+  "maxGatewayRetries": 1,
+  "maxLocalRetries": 2,
+  "maxLlmReplans": 1,
+  "maxOutputTokens": 512,
+  "requestJsonResponseFormat": true,
+  "offlineRequestsPerMinute": 12,
+  "offlineMaxAttemptsPerCase": 3,
+  "offlineDefaultCostCapUsd": 5.0,
+  "accountingInputUsdPerMillionTokens": 10.0,
+  "accountingOutputUsdPerMillionTokens": 30.0,
+  "gameBatchMinLlmIntervalMillis": 3000,
+  "minimumQuantity": 1,
+  "maximumQuantity": 64,
+  "minimumRadius": 1,
+  "maximumRadius": 24,
+  "allowedTargets": [
+    "minecraft:birch_log",
+    "minecraft:oak_log",
+    "minecraft:spruce_log"
+  ]
+}

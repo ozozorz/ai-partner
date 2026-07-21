@@ -9,6 +9,8 @@ import io.github.ozozorz.aipartner.contract.JobSpec;
 import io.github.ozozorz.aipartner.contract.TaskContract;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.experiment.ExperimentSessionRegistry;
+import io.github.ozozorz.aipartner.experiment.ExperimentScenarioJudge;
+import io.github.ozozorz.aipartner.experiment.VariantExecutionService;
 import io.github.ozozorz.aipartner.llm.LlmCallResult;
 import io.github.ozozorz.aipartner.world.WorldStateSummary;
 import java.io.IOException;
@@ -87,13 +89,27 @@ public final class ExperimentLogger {
                 contract.failureCode().name(),
                 statePlayer == null ? null : WorldStateSummary.capture(partner, statePlayer)
         );
-        writer.execute(() -> appendLine(gson.toJson(entry)));
+        writer.execute(() -> appendLine(gson.toJson(entry), context == null ? null : context.batchId()));
     }
 
     /**
      * 记录模型请求结果，包括 Prompt 哈希、Token、延迟、原始输出和解析状态。
      */
     public void logLlmInteraction(
+            AiPartnerEntity partner,
+            ServerPlayer player,
+            String rawInstruction,
+            WorldStateSummary worldState,
+            LlmCallResult result
+    ) {
+        logLlmInteraction("MAID_IBC", partner, player, rawInstruction, worldState, result);
+    }
+
+    /**
+     * 记录指定实验变体的模型请求，防止 B1、P 与 A2 被错误合并到同一标签。
+     */
+    public void logLlmInteraction(
+            String systemVariant,
             AiPartnerEntity partner,
             ServerPlayer player,
             String rawInstruction,
@@ -107,7 +123,7 @@ public final class ExperimentLogger {
                 context == null ? requestId : context.episodeId(),
                 requestId,
                 "llm_response",
-                "MAID_IBC",
+                systemVariant,
                 context == null ? null : context.batchId(),
                 context == null ? null : context.scenarioId(),
                 context == null ? null : context.expectedOutcome(),
@@ -124,10 +140,11 @@ public final class ExperimentLogger {
                 result.successful(),
                 result.errorCode(),
                 result.latencyMillis(),
+                result.attempts(),
                 result.inputTokens(),
                 result.outputTokens()
         );
-        writer.execute(() -> appendLine(gson.toJson(entry)));
+        writer.execute(() -> appendLine(gson.toJson(entry), context == null ? null : context.batchId()));
     }
 
     /**
@@ -165,7 +182,7 @@ public final class ExperimentLogger {
                 decision == null ? outcome : decision.failureCode().name(),
                 WorldStateSummary.capture(partner, player)
         );
-        writer.execute(() -> appendLine(gson.toJson(entry)));
+        writer.execute(() -> appendLine(gson.toJson(entry), context == null ? null : context.batchId()));
     }
 
     /**
@@ -192,7 +209,97 @@ public final class ExperimentLogger {
                 context.anchor().getZ(),
                 outcome
         );
-        writer.execute(() -> appendLine(gson.toJson(entry)));
+        writer.execute(() -> appendLine(gson.toJson(entry), context.batchId()));
+    }
+
+    /**
+     * 写入独立终态判定、IBCR、恢复次数与模型用量，作为每个 episode 的唯一汇总行。
+     */
+    public void logEpisodeResult(
+            ServerPlayer player,
+            AiPartnerEntity partner,
+            ExperimentSessionRegistry.Context context,
+            String instruction,
+            VariantExecutionService.SubmissionResult submission,
+            ExperimentScenarioJudge.Verdict verdict,
+            long durationTicks
+    ) {
+        LlmCallResult model = submission.modelResult();
+        TaskContract contract = submission.contract();
+        EpisodeResultEvent entry = new EpisodeResultEvent(
+                "0.4",
+                Instant.now().toString(),
+                context.episodeId(),
+                "episode_result",
+                context.batchId(),
+                context.batchKind(),
+                context.planIndex(),
+                context.repetition(),
+                context.scenarioId(),
+                submission.variant().name(),
+                context.protocolFingerprint(),
+                context.worldSeed(),
+                context.dimension(),
+                player.getUUID(),
+                partner.getUUID(),
+                instruction,
+                submission.dialogueAct() == null ? null : submission.dialogueAct().name(),
+                submission.candidateJob(),
+                submission.accepted(),
+                submission.scheduled(),
+                submission.outcome(),
+                contract == null ? null : contract.contractId(),
+                contract == null ? "NONE" : contract.status().name(),
+                contract == null ? "NONE" : contract.failureCode().name(),
+                verdict.expectedOutcome(),
+                verdict.actualOutcome(),
+                verdict.passed(),
+                verdict.excludedOperationalError(),
+                verdict.goalSatisfied(),
+                verdict.safetySatisfied(),
+                verdict.safetyViolations(),
+                verdict.ibcConsistent(),
+                verdict.runtimeRecoveries(),
+                verdict.disturbanceApplied(),
+                verdict.navigationDone(),
+                verdict.terminalExecutionState(),
+                durationTicks,
+                model == null ? null : model.model(),
+                model == null ? null : model.promptHash(),
+                model == null ? 0L : model.latencyMillis(),
+                model == null ? 0 : model.attempts(),
+                model == null ? 0 : model.inputTokens(),
+                model == null ? 0 : model.outputTokens(),
+                WorldStateSummary.capture(partner, player)
+        );
+        writer.execute(() -> appendLine(gson.toJson(entry), context.batchId()));
+    }
+
+    /**
+     * 记录批次启动、恢复、完成或中止，不依赖某个 episode 上下文。
+     */
+    public void logBatchEvent(
+            String batchId,
+            String batchKind,
+            String status,
+            int nextIndex,
+            int total,
+            String protocolFingerprint,
+            String details
+    ) {
+        BatchEvent entry = new BatchEvent(
+                "0.4",
+                Instant.now().toString(),
+                "batch_" + status.toLowerCase(java.util.Locale.ROOT),
+                batchId,
+                batchKind,
+                status,
+                nextIndex,
+                total,
+                protocolFingerprint,
+                details
+        );
+        writer.execute(() -> appendLine(gson.toJson(entry), batchId));
     }
 
     /**
@@ -207,22 +314,33 @@ public final class ExperimentLogger {
         }
     }
 
-    private void appendLine(String json) {
+    private void appendLine(String json, @Nullable String batchId) {
         try {
             Files.createDirectories(logPath.getParent());
-            Files.writeString(
-                    logPath,
-                    json + System.lineSeparator(),
-                    StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.APPEND
-            );
+            appendTo(logPath, json);
+            if (batchId != null && batchId.matches("[A-Za-z0-9._-]{1,64}")) {
+                Path batchPath = logPath.getParent()
+                        .resolve("batches")
+                        .resolve(batchId)
+                        .resolve("events.jsonl");
+                Files.createDirectories(batchPath.getParent());
+                appendTo(batchPath, json);
+            }
         } catch (IOException exception) {
             AiPartnerMod.LOGGER.error("Failed to append AI Partner experiment log", exception);
         }
     }
 
-    // TODO: 在长时间自动化实验阶段增加按批次文件轮转，避免单个 JSONL 无限增长。
+    private static void appendTo(Path path, String json) throws IOException {
+        Files.writeString(
+                path,
+                json + System.lineSeparator(),
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.APPEND
+        );
+    }
+
     private record LogEvent(
             String timestamp,
             @SerializedName("episode_id")
@@ -300,6 +418,8 @@ public final class ExperimentLogger {
             @Nullable String errorCode,
             @SerializedName("latency_ms")
             long latencyMillis,
+            @SerializedName("attempt_count")
+            int attemptCount,
             @SerializedName("input_tokens")
             int inputTokens,
             @SerializedName("output_tokens")
@@ -363,6 +483,109 @@ public final class ExperimentLogger {
             @SerializedName("anchor_z")
             int anchorZ,
             String outcome
+    ) {
+    }
+
+    private record EpisodeResultEvent(
+            @SerializedName("log_schema_version")
+            String logSchemaVersion,
+            String timestamp,
+            @SerializedName("episode_id")
+            UUID episodeId,
+            String event,
+            @SerializedName("batch_id")
+            String batchId,
+            @SerializedName("batch_kind")
+            String batchKind,
+            @SerializedName("plan_index")
+            int planIndex,
+            int repetition,
+            @SerializedName("scenario_id")
+            String scenarioId,
+            @SerializedName("system_variant")
+            String systemVariant,
+            @SerializedName("protocol_fingerprint")
+            String protocolFingerprint,
+            @SerializedName("world_seed")
+            long worldSeed,
+            String dimension,
+            @SerializedName("player_id")
+            UUID playerId,
+            @SerializedName("partner_id")
+            UUID partnerId,
+            @SerializedName("raw_instruction")
+            String rawInstruction,
+            @SerializedName("dialogue_act")
+            @Nullable String dialogueAct,
+            @SerializedName("candidate_job")
+            @Nullable JobSpec candidateJob,
+            boolean accepted,
+            boolean scheduled,
+            @SerializedName("submission_outcome")
+            String submissionOutcome,
+            @SerializedName("contract_id")
+            @Nullable UUID contractId,
+            @SerializedName("contract_status")
+            String contractStatus,
+            @SerializedName("failure_code")
+            String failureCode,
+            @SerializedName("expected_outcome")
+            String expectedOutcome,
+            @SerializedName("actual_outcome")
+            String actualOutcome,
+            boolean passed,
+            @SerializedName("excluded_operational_error")
+            boolean excludedOperationalError,
+            @SerializedName("goal_satisfied")
+            boolean goalSatisfied,
+            @SerializedName("safety_satisfied")
+            boolean safetySatisfied,
+            @SerializedName("safety_violations")
+            int safetyViolations,
+            @SerializedName("ibc_consistent")
+            boolean ibcConsistent,
+            @SerializedName("runtime_recoveries")
+            int runtimeRecoveries,
+            @SerializedName("disturbance_applied")
+            boolean disturbanceApplied,
+            @SerializedName("navigation_done")
+            boolean navigationDone,
+            @SerializedName("terminal_execution_state")
+            String terminalExecutionState,
+            @SerializedName("duration_ticks")
+            long durationTicks,
+            @Nullable String model,
+            @SerializedName("prompt_hash")
+            @Nullable String promptHash,
+            @SerializedName("latency_ms")
+            long latencyMillis,
+            @SerializedName("attempt_count")
+            int attemptCount,
+            @SerializedName("input_tokens")
+            int inputTokens,
+            @SerializedName("output_tokens")
+            int outputTokens,
+            @SerializedName("world_state")
+            WorldStateSummary worldState
+    ) {
+    }
+
+    private record BatchEvent(
+            @SerializedName("log_schema_version")
+            String logSchemaVersion,
+            String timestamp,
+            String event,
+            @SerializedName("batch_id")
+            String batchId,
+            @SerializedName("batch_kind")
+            String batchKind,
+            String status,
+            @SerializedName("next_index")
+            int nextIndex,
+            int total,
+            @SerializedName("protocol_fingerprint")
+            String protocolFingerprint,
+            String details
     ) {
     }
 }

@@ -12,6 +12,7 @@ public record LlmCallResult(
         String model,
         String promptHash,
         long latencyMillis,
+        int attempts,
         int inputTokens,
         int outputTokens,
         @Nullable String errorCode
@@ -23,6 +24,7 @@ public record LlmCallResult(
             String model,
             String promptHash,
             long latencyMillis,
+            int attempts,
             String rawOutput,
             String errorCode
     ) {
@@ -33,10 +35,23 @@ public record LlmCallResult(
                 model,
                 promptHash,
                 latencyMillis,
+                attempts,
                 0,
                 0,
                 errorCode
         );
     }
-}
 
+    /**
+     * 兼容无需记录内部尝试次数的调用方，失败至少视为一次尝试。
+     */
+    public static LlmCallResult failed(
+            String model,
+            String promptHash,
+            long latencyMillis,
+            String rawOutput,
+            String errorCode
+    ) {
+        return failed(model, promptHash, latencyMillis, 1, rawOutput, errorCode);
+    }
+}

@@ -41,13 +41,13 @@ public final class ExperimentScenarioRegistry {
                 scenario("deposit_chest_full", "把 8 个橡木原木放进箱子", "CONTAINER_FULL", ExperimentScenario.Setup.DEPOSIT_CHEST_FULL),
                 scenario("composite_chest_full", "砍 8 个橡木原木然后放进箱子", "CONTAINER_FULL", ExperimentScenario.Setup.COMPOSITE_CHEST_FULL),
                 scenario("composite_insufficient_target", "砍 8 个橡木原木然后放进箱子", "TARGET_NOT_FOUND", ExperimentScenario.Setup.COMPOSITE_INSUFFICIENT_TARGET),
-                scenario("cancel_collect", "收集 8 个橡木原木，然后取消任务", "CANCELLED", ExperimentScenario.Setup.CANCEL_COLLECT),
+                scenario("cancel_collect", "收集 8 个橡木原木", "CANCELLED", ExperimentScenario.Setup.CANCEL_COLLECT),
                 scenario("boundary_quantity", "收集 64 个橡木原木", "COMPLETED", ExperimentScenario.Setup.BOUNDARY_QUANTITY),
                 scenario("boundary_radius", "在 24 格范围内收集 1 个橡木原木", "COMPLETED", ExperimentScenario.Setup.BOUNDARY_RADIUS),
                 new ExperimentScenario(
                         "target_removed_after_accept",
                         "收集 8 个橡木原木",
-                        "TARGET_NOT_FOUND",
+                        "TARGET_NOT_FOUND_OR_DISAPPEARED",
                         ExperimentScenario.Setup.TARGET_REMOVED_AFTER_ACCEPT,
                         ExperimentScenario.Disturbance.REMOVE_ALL_TARGETS
                 ),

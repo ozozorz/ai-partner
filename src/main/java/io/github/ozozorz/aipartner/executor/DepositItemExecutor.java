@@ -140,6 +140,10 @@ public final class DepositItemExecutor {
         return movedCount;
     }
 
+    public String stateName() {
+        return state.name();
+    }
+
     /**
      * 取消或替换任务时清理临时状态。
      */
@@ -202,8 +206,8 @@ public final class DepositItemExecutor {
     }
 
     private void navigateToContainer(ServerLevel level) {
-        if (!containerStillUsable(level)) {
-            retryWithAnotherContainer();
+        if (partner.usesRuntimeMonitoring() && !containerStillUsable(level)) {
+            handleUnavailableContainer(FailureCode.TARGET_DISAPPEARED);
             return;
         }
         if (distanceToContainerSquared() <= INTERACTION_DISTANCE_SQUARED) {
@@ -222,15 +226,15 @@ public final class DepositItemExecutor {
                 1.0
         );
         pathFailures = pathStarted ? 0 : pathFailures + 1;
-        if (pathFailures > contract.failurePolicy().maxLocalRetries()) {
-            retryWithAnotherContainer();
+        if (pathFailures > partner.getMaximumLocalRetries()) {
+            handleUnavailableContainer(FailureCode.PATH_UNREACHABLE);
         }
     }
 
     private void checkContainer(ServerLevel level) {
         Container container = resolveCurrentContainer(level);
         if (container == null) {
-            retryWithAnotherContainer();
+            handleUnavailableContainer(FailureCode.TARGET_DISAPPEARED);
             return;
         }
         if (distanceToContainerSquared() > INTERACTION_DISTANCE_SQUARED) {
@@ -244,7 +248,7 @@ public final class DepositItemExecutor {
         }
         if (!ContainerTargets.hasCapacity(container, new ItemStack(targetItem), remaining)) {
             sawFullContainer = true;
-            retryWithAnotherContainer();
+            handleUnavailableContainer(FailureCode.CONTAINER_FULL);
             return;
         }
         transitionTo(State.DEPOSIT);
@@ -256,7 +260,7 @@ public final class DepositItemExecutor {
         }
         Container container = resolveCurrentContainer(level);
         if (container == null) {
-            retryWithAnotherContainer();
+            handleUnavailableContainer(FailureCode.TARGET_DISAPPEARED);
             return;
         }
 
@@ -288,7 +292,7 @@ public final class DepositItemExecutor {
             fail(FailureCode.MISSING_ITEM);
         } else {
             sawFullContainer = true;
-            retryWithAnotherContainer();
+            handleUnavailableContainer(FailureCode.CONTAINER_FULL);
         }
     }
 
@@ -336,6 +340,18 @@ public final class DepositItemExecutor {
         searchIterator = null;
         pathFailures = 0;
         transitionTo(State.SEARCH_CONTAINER);
+    }
+
+    /**
+     * 完整系统可切换到其他容器；无监控消融只执行安全终止，不进行恢复。
+     */
+    private void handleUnavailableContainer(FailureCode failureCode) {
+        if (!partner.allowsLocalRecovery()) {
+            fail(failureCode);
+            return;
+        }
+        partner.recordRuntimeRecovery(failureCode.name());
+        retryWithAnotherContainer();
     }
 
     private void fail(FailureCode failureCode) {

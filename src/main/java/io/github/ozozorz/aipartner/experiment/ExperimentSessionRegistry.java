@@ -13,7 +13,7 @@ import net.minecraft.server.level.ServerPlayer;
  * 保存当前服务器进程中的实验批次与玩家场景上下文，供命令和异步日志关联。
  */
 public final class ExperimentSessionRegistry {
-    private static final String BATCH_ID = LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.BASIC_ISO_DATE)
+    private static final String MANUAL_BATCH_ID = LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.BASIC_ISO_DATE)
             + "-" + UUID.randomUUID().toString().substring(0, 8);
     private static final ConcurrentHashMap<UUID, Context> ACTIVE = new ConcurrentHashMap<>();
 
@@ -28,14 +28,31 @@ public final class ExperimentSessionRegistry {
             ExperimentScenario scenario,
             BlockPos anchor
     ) {
+        return begin(player, scenario, anchor, BatchMetadata.manual());
+    }
+
+    /**
+     * 为自动批处理创建带计划位置、重复号和协议指纹的 episode 上下文。
+     */
+    public static Context begin(
+            ServerPlayer player,
+            ExperimentScenario scenario,
+            BlockPos anchor,
+            BatchMetadata metadata
+    ) {
         Context context = new Context(
                 UUID.randomUUID(),
-                BATCH_ID,
+                metadata.batchId(),
                 scenario.id(),
                 scenario.expectedOutcome(),
                 anchor.immutable(),
                 player.level().getSeed(),
-                player.level().dimension().identifier().toString()
+                player.level().dimension().identifier().toString(),
+                metadata.systemVariant(),
+                metadata.repetition(),
+                metadata.planIndex(),
+                metadata.batchKind(),
+                metadata.protocolFingerprint()
         );
         ACTIVE.put(player.getUUID(), context);
         return context;
@@ -59,7 +76,34 @@ public final class ExperimentSessionRegistry {
             String expectedOutcome,
             BlockPos anchor,
             long worldSeed,
-            String dimension
+            String dimension,
+            String systemVariant,
+            int repetition,
+            int planIndex,
+            String batchKind,
+            String protocolFingerprint
     ) {
+    }
+
+    /**
+     * 自动化计划写入场景上下文的不可变批次元数据。
+     */
+    public record BatchMetadata(
+            String batchId,
+            String systemVariant,
+            int repetition,
+            int planIndex,
+            String batchKind,
+            String protocolFingerprint
+    ) {
+        public BatchMetadata {
+            if (batchId == null || !batchId.matches("[A-Za-z0-9._-]{1,64}")) {
+                throw new IllegalArgumentException("Invalid experiment batch id");
+            }
+        }
+
+        private static BatchMetadata manual() {
+            return new BatchMetadata(MANUAL_BATCH_ID, "MANUAL", 0, -1, "MANUAL", "UNFROZEN");
+        }
     }
 }

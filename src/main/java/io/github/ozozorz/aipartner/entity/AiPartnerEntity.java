@@ -10,6 +10,7 @@ import io.github.ozozorz.aipartner.entity.navigation.AiPartnerPathNavigation;
 import io.github.ozozorz.aipartner.executor.CollectBlockExecutor;
 import io.github.ozozorz.aipartner.executor.CollectAndDepositExecutor;
 import io.github.ozozorz.aipartner.executor.DepositItemExecutor;
+import io.github.ozozorz.aipartner.experiment.SystemVariant;
 import io.github.ozozorz.aipartner.inventory.AiPartnerMenu;
 import io.github.ozozorz.aipartner.job.JobType;
 import io.github.ozozorz.aipartner.logging.ExperimentLogger;
@@ -81,6 +82,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     private int depositMovedCount;
     private CollectAndDepositExecutor.Phase compositePhase = CollectAndDepositExecutor.Phase.IDLE;
     private String currentSystemVariant = "RULE_BT";
+    private int runtimeRecoveryCount;
     private boolean inventoryMenuOpen;
 
     public AiPartnerEntity(EntityType<? extends AiPartnerEntity> entityType, Level level) {
@@ -210,7 +212,59 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
      * 返回契约允许的本地恢复次数。
      */
     public int getMaximumLocalRetries() {
-        return currentContract == null ? 0 : currentContract.failurePolicy().maxLocalRetries();
+        return currentContract == null || !allowsLocalRecovery()
+                ? 0
+                : currentContract.failurePolicy().maxLocalRetries();
+    }
+
+    /**
+     * 返回当前实验变体是否启用了持续运行时状态监控。
+     */
+    public boolean usesRuntimeMonitoring() {
+        return activeSystemVariant().runtimeMonitoringEnabled();
+    }
+
+    /**
+     * 返回当前实验变体是否允许目标消失、路径失败等故障触发局部恢复。
+     */
+    public boolean allowsLocalRecovery() {
+        return activeSystemVariant().localRecoveryEnabled();
+    }
+
+    /**
+     * 记录一次确实由动态故障触发的恢复，供 FRR 与扰动恢复分析使用。
+     */
+    public void recordRuntimeRecovery(String reason) {
+        runtimeRecoveryCount++;
+        logEvent("runtime_recovery", null, reason);
+    }
+
+    public int getRuntimeRecoveryCount() {
+        return runtimeRecoveryCount;
+    }
+
+    /**
+     * 返回当前执行器的显式状态，供自动扰动在目标已经选定后确定性触发。
+     */
+    public String activeExecutionState() {
+        if (isCompositeContractRunning()) {
+            return "COMPOSITE_" + compositePhase.name() + "_"
+                    + (compositePhase == CollectAndDepositExecutor.Phase.DEPOSITING
+                    ? depositItemExecutor.stateName()
+                    : collectBlockExecutor.stateName());
+        }
+        return switch (getMode()) {
+            case COLLECTING -> "COLLECT_" + collectBlockExecutor.stateName();
+            case DEPOSITING -> "DEPOSIT_" + depositItemExecutor.stateName();
+            default -> getMode().name();
+        };
+    }
+
+    /**
+     * 自动化取消场景使用此入口终止原任务并保留其 CANCELLED 终态供独立判定。
+     */
+    public void cancelActiveTaskForExperiment(ServerPlayer actor, String reason) {
+        cancelExistingContract(actor, reason);
     }
 
     /**
@@ -395,6 +449,13 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
      * 为受控实验场景清除任务状态，并先把原背包和装备安全归还管理员玩家。
      */
     public void resetForExperiment(ServerPlayer actor) {
+        resetForExperiment(actor, true);
+    }
+
+    /**
+     * 自动批次在首个 episode 后丢弃上一个受控场景生成的物品，避免污染玩家背包和后续场景。
+     */
+    public void resetForExperiment(ServerPlayer actor, boolean returnContentsToPlayer) {
         if (level().isClientSide()) {
             throw new IllegalStateException("Experiment reset may only run on the server");
         }
@@ -405,7 +466,9 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         depositItemExecutor.stop();
         navigation.stop();
         for (ItemStack stack : inventory.removeAllItems()) {
-            actor.getInventory().placeItemBackInInventory(stack);
+            if (returnContentsToPlayer) {
+                actor.getInventory().placeItemBackInInventory(stack);
+            }
         }
         for (EquipmentSlot slot : new EquipmentSlot[]{
                 EquipmentSlot.MAINHAND,
@@ -418,13 +481,16 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             ItemStack equipped = getItemBySlot(slot);
             if (!equipped.isEmpty()) {
                 setItemSlot(slot, ItemStack.EMPTY);
-                actor.getInventory().placeItemBackInInventory(equipped);
+                if (returnContentsToPlayer) {
+                    actor.getInventory().placeItemBackInInventory(equipped);
+                }
             }
         }
         collectInitialTargetCount = 0;
         depositMovedCount = 0;
         compositePhase = CollectAndDepositExecutor.Phase.IDLE;
         currentSystemVariant = "EXPERIMENT_RESET";
+        runtimeRecoveryCount = 0;
         inventoryMenuOpen = false;
         setMode(PartnerMode.IDLE);
         setHealth(getMaxHealth());
@@ -458,6 +524,10 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
                     rawInstruction
             );
         }
+    }
+
+    private SystemVariant activeSystemVariant() {
+        return SystemVariant.parse(currentSystemVariant).orElse(SystemVariant.RULE_BT);
     }
 
     private void notifyOwner(Component message) {
@@ -655,6 +725,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         output.putInt("DepositMovedCount", depositMovedCount);
         output.putString("CompositePhase", compositePhase.name());
         output.putString("CurrentSystemVariant", currentSystemVariant);
+        output.putInt("RuntimeRecoveryCount", runtimeRecoveryCount);
         if (currentContract != null) {
             output.putString("ContractId", currentContract.contractId().toString());
             output.putString("ContractJobType", currentContract.job().type().name());
@@ -678,6 +749,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
                 CollectAndDepositExecutor.Phase.COLLECTING.name()
         ));
         currentSystemVariant = input.getStringOr("CurrentSystemVariant", "RULE_BT");
+        runtimeRecoveryCount = input.getIntOr("RuntimeRecoveryCount", 0);
         setMode(PartnerMode.fromName(input.getStringOr("PartnerMode", PartnerMode.IDLE.name())));
         Optional<String> savedContractId = input.getString("ContractId");
         if (savedContractId.isEmpty()) {

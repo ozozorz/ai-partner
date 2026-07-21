@@ -2,6 +2,8 @@ package io.github.ozozorz.aipartner;
 
 import io.github.ozozorz.aipartner.command.MaidCommand;
 import io.github.ozozorz.aipartner.llm.LlmGateway;
+import io.github.ozozorz.aipartner.evaluation.OfflineLlmEvaluationService;
+import io.github.ozozorz.aipartner.experiment.ExperimentBatchRunner;
 import io.github.ozozorz.aipartner.logging.ExperimentLogger;
 import io.github.ozozorz.aipartner.registry.ModEntities;
 import io.github.ozozorz.aipartner.registry.ModMenus;
@@ -23,7 +25,11 @@ public final class AiPartnerMod implements ModInitializer {
         ModEntities.register();
         ModMenus.register();
         MaidCommand.register();
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> ExperimentLogger.getInstance().flush());
+        ExperimentBatchRunner.register();
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            OfflineLlmEvaluationService.getInstance().pauseForServerStop();
+            ExperimentLogger.getInstance().flush();
+        });
         LOGGER.info(
                 "AI Partner initialized for Minecraft 26.1.2; asynchronous LLM gateway enabled={}",
                 LlmGateway.getInstance().isEnabled()

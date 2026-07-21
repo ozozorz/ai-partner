@@ -51,6 +51,14 @@ public final class LlmGateway {
         return config.isLlmReady();
     }
 
+    public String model() {
+        return config.model();
+    }
+
+    public String promptHash() {
+        return promptHash;
+    }
+
     /**
      * 在非 tick 线程发送请求，并把所有预期失败归一化为 LlmCallResult。
      */
@@ -58,32 +66,66 @@ public final class LlmGateway {
             String playerMessage,
             WorldStateSummary worldState
     ) {
+        return interpret(playerMessage, worldState, config.maxRetries());
+    }
+
+    /**
+     * 只发送一次 HTTP 请求，供离线评测器统一实施限速、重试和费用检查。
+     */
+    public CompletableFuture<LlmCallResult> interpretOnce(
+            String playerMessage,
+            WorldStateSummary worldState
+    ) {
+        return interpret(playerMessage, worldState, 0);
+    }
+
+    private CompletableFuture<LlmCallResult> interpret(
+            String playerMessage,
+            WorldStateSummary worldState,
+            int maximumRetries
+    ) {
         long startedNanos = System.nanoTime();
         if (!isEnabled()) {
             return CompletableFuture.completedFuture(LlmCallResult.failed(
                     config.model(),
                     promptHash,
                     0L,
+                    0,
                     "",
                     "LLM_DISABLED"
             ));
         }
 
         String requestBody = createRequestBody(playerMessage, worldState);
-        return sendWithRetry(requestBody, 0)
-                .handle((response, throwable) -> {
+        return sendWithRetry(requestBody, 0, maximumRetries)
+                .handle((attemptedResponse, throwable) -> {
                     long latencyMillis = Duration.ofNanos(System.nanoTime() - startedNanos).toMillis();
                     if (throwable != null) {
                         if (unwrap(throwable) instanceof java.util.concurrent.CancellationException cancellation) {
                             throw cancellation;
                         }
-                        return LlmCallResult.failed(config.model(), promptHash, latencyMillis, "", classify(throwable));
+                        return LlmCallResult.failed(
+                                config.model(),
+                                promptHash,
+                                latencyMillis,
+                                attemptsOf(throwable),
+                                "",
+                                classify(throwable)
+                        );
                     }
-                    return decodeResponse(response, latencyMillis);
+                    return decodeResponse(
+                            attemptedResponse.response(),
+                            latencyMillis,
+                            attemptedResponse.attempts()
+                    );
                 });
     }
 
-    private CompletableFuture<HttpResponse<String>> sendWithRetry(String requestBody, int attempt) {
+    private CompletableFuture<AttemptedResponse> sendWithRetry(
+            String requestBody,
+            int attempt,
+            int maximumRetries
+    ) {
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(config.endpoint()))
                 .timeout(Duration.ofSeconds(config.timeoutSeconds()))
                 .header("Content-Type", "application/json")
@@ -97,21 +139,23 @@ public final class LlmGateway {
                 .handle((response, throwable) -> {
                     Throwable root = throwable == null ? null : unwrap(throwable);
                     if (root instanceof java.util.concurrent.CancellationException) {
-                        return CompletableFuture.<HttpResponse<String>>failedFuture(root);
+                        return CompletableFuture.<AttemptedResponse>failedFuture(root);
                     }
                     boolean retryable = throwable != null || response.statusCode() >= 500 || response.statusCode() == 429;
-                    if (retryable && attempt < config.maxRetries()) {
-                        return sendWithRetry(requestBody, attempt + 1);
+                    if (retryable && attempt < maximumRetries) {
+                        return sendWithRetry(requestBody, attempt + 1, maximumRetries);
                     }
                     if (throwable != null) {
-                        return CompletableFuture.<HttpResponse<String>>failedFuture(root);
-                    }
-                    if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                        return CompletableFuture.<HttpResponse<String>>failedFuture(
-                                new GatewayException("HTTP_" + response.statusCode())
+                        return CompletableFuture.<AttemptedResponse>failedFuture(
+                                new GatewayException(classify(root), attempt + 1, root)
                         );
                     }
-                    return CompletableFuture.completedFuture(response);
+                    if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                        return CompletableFuture.<AttemptedResponse>failedFuture(
+                                new GatewayException("HTTP_" + response.statusCode(), attempt + 1, null)
+                        );
+                    }
+                    return CompletableFuture.completedFuture(new AttemptedResponse(response, attempt + 1));
                 })
                 .thenCompose(future -> future);
     }
@@ -151,7 +195,11 @@ public final class LlmGateway {
         return host != null && (host.equalsIgnoreCase("api.deepseek.com") || host.endsWith(".deepseek.com"));
     }
 
-    private LlmCallResult decodeResponse(HttpResponse<String> response, long latencyMillis) {
+    private LlmCallResult decodeResponse(
+            HttpResponse<String> response,
+            long latencyMillis,
+            int attempts
+    ) {
         String rawModelOutput = "";
         try {
             JsonObject envelope = JsonParser.parseString(response.body()).getAsJsonObject();
@@ -175,12 +223,20 @@ public final class LlmGateway {
                     responseModel,
                     promptHash,
                     latencyMillis,
+                    attempts,
                     inputTokens,
                     outputTokens,
                     null
             );
         } catch (RuntimeException exception) {
-            return LlmCallResult.failed(config.model(), promptHash, latencyMillis, rawModelOutput, "INVALID_MODEL_OUTPUT");
+            return LlmCallResult.failed(
+                    config.model(),
+                    promptHash,
+                    latencyMillis,
+                    attempts,
+                    rawModelOutput,
+                    "INVALID_MODEL_OUTPUT"
+            );
         }
     }
 
@@ -244,6 +300,11 @@ public final class LlmGateway {
         return "NETWORK_ERROR";
     }
 
+    private static int attemptsOf(Throwable throwable) {
+        Throwable root = unwrap(throwable);
+        return root instanceof GatewayException gatewayException ? gatewayException.attempts : 1;
+    }
+
     /**
      * 模组内部共享的 Gson 实例，避免配置不同导致实验请求不一致。
      */
@@ -254,12 +315,17 @@ public final class LlmGateway {
         }
     }
 
+    private record AttemptedResponse(HttpResponse<String> response, int attempts) {
+    }
+
     private static final class GatewayException extends RuntimeException {
         private final String code;
+        private final int attempts;
 
-        private GatewayException(String code) {
-            super(code);
+        private GatewayException(String code, int attempts, Throwable cause) {
+            super(code, cause);
             this.code = code;
+            this.attempts = attempts;
         }
     }
 }
