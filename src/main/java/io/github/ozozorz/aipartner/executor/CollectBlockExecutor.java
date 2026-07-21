@@ -2,6 +2,7 @@ package io.github.ozozorz.aipartner.executor;
 
 import io.github.ozozorz.aipartner.contract.FailureCode;
 import io.github.ozozorz.aipartner.contract.TaskContract;
+import io.github.ozozorz.aipartner.core.action.MaidActions;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.job.AllowedTargets;
 import java.util.HashSet;
@@ -11,12 +12,12 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.gamerules.GameRules;
+import org.jspecify.annotations.Nullable;
 
 /**
  * `COLLECT_BLOCK` 的确定性显式状态机，负责有限搜索、寻路、破坏、拾取和目标判定。
@@ -28,9 +29,9 @@ public final class CollectBlockExecutor {
     private static final double INTERACTION_DISTANCE_SQUARED = 9.0;
 
     private final AiPartnerEntity partner;
-    private final TaskExecutionListener defaultListener;
+    private final MaidActions actions;
     private final Set<Long> unavailableTargets = new HashSet<>();
-    private TaskExecutionListener resultListener;
+    private @Nullable TaskExecutionListener resultListener;
     private State state = State.IDLE;
     private TaskContract contract;
     private Block targetBlock;
@@ -46,15 +47,7 @@ public final class CollectBlockExecutor {
 
     public CollectBlockExecutor(AiPartnerEntity partner) {
         this.partner = partner;
-        this.defaultListener = TaskExecutionListener.activeContract(partner);
-        this.resultListener = defaultListener;
-    }
-
-    /**
-     * 用已验证契约初始化执行器；非法目标会以内部故障安全终止。
-     */
-    public void start(TaskContract taskContract) {
-        start(taskContract, null, defaultListener);
+        this.actions = MaidActions.create(partner);
     }
 
     /**
@@ -62,13 +55,6 @@ public final class CollectBlockExecutor {
      */
     public void start(TaskContract taskContract, TaskExecutionListener listener) {
         start(taskContract, null, listener);
-    }
-
-    /**
-     * 从服务器存档恢复任务时沿用原始背包基线，避免重启后重复收集完整数量。
-     */
-    public void restore(TaskContract taskContract, int savedInitialTargetCount) {
-        start(taskContract, savedInitialTargetCount, defaultListener);
     }
 
     /**
@@ -93,7 +79,7 @@ public final class CollectBlockExecutor {
         this.targetBlock = AllowedTargets.resolveCollectibleBlock(taskContract.job().target()).orElse(null);
         this.targetItem = targetBlock == null ? null : AllowedTargets.asCollectibleItem(targetBlock).orElse(null);
         if (targetBlock == null || targetItem == null) {
-            resultListener.onFailed(FailureCode.INTERNAL_ERROR);
+            listener.onFailed(FailureCode.INTERNAL_ERROR);
             return;
         }
         this.origin = partner.blockPosition().immutable();
@@ -126,7 +112,7 @@ public final class CollectBlockExecutor {
         }
         if (partner.usesRuntimeMonitoring() && goalSatisfied()) {
             transitionTo(State.COMPLETE);
-            resultListener.onCompleted();
+            resultListener().onCompleted();
             return;
         }
 
@@ -161,7 +147,7 @@ public final class CollectBlockExecutor {
         pathFailures = 0;
         deadlineGameTime = 0L;
         unavailableTargets.clear();
-        resultListener = defaultListener;
+        resultListener = null;
     }
 
     /**
@@ -231,7 +217,7 @@ public final class CollectBlockExecutor {
             return;
         }
         if (distanceToTargetSquared() <= INTERACTION_DISTANCE_SQUARED) {
-            partner.getNavigation().stop();
+            actions.navigation().stop();
             transitionTo(State.CHECK_TARGET);
             return;
         }
@@ -239,13 +225,7 @@ public final class CollectBlockExecutor {
             return;
         }
 
-        boolean pathStarted = partner.getNavigation().moveTo(
-                targetPosition.getX() + 0.5,
-                targetPosition.getY(),
-                targetPosition.getZ() + 0.5,
-                1,
-                1.0
-        );
+        boolean pathStarted = actions.navigation().moveTo(targetPosition, 1.0);
         pathFailures = pathStarted ? 0 : pathFailures + 1;
         if (pathFailures > partner.getMaximumLocalRetries()) {
             handleUnavailableTarget(FailureCode.PATH_UNREACHABLE);
@@ -283,13 +263,13 @@ public final class CollectBlockExecutor {
             return;
         }
         if (stateTicks % 5 == 1) {
-            partner.swing(InteractionHand.MAIN_HAND);
+            actions.breakBlock().swingMainHand();
         }
         if (stateTicks < BREAK_DURATION_TICKS) {
             return;
         }
 
-        boolean destroyed = level.destroyBlock(targetPosition, false, partner, Block.UPDATE_LIMIT);
+        boolean destroyed = actions.breakBlock().destroy(level, targetPosition);
         if (!destroyed) {
             handleUnavailableTarget(FailureCode.PERMISSION_DENIED);
             return;
@@ -314,7 +294,7 @@ public final class CollectBlockExecutor {
      */
     private void waitForPickup() {
         if (goalSatisfied() || partner.countItem(targetItem) > countBeforeBreak) {
-            partner.getNavigation().stop();
+            actions.navigation().stop();
             transitionTo(State.CHECK_GOAL);
             return;
         }
@@ -323,7 +303,7 @@ public final class CollectBlockExecutor {
             return;
         }
         if (stateTicks >= PICKUP_TIMEOUT_TICKS) {
-            partner.getNavigation().stop();
+            actions.navigation().stop();
             handleUnavailableTarget(FailureCode.TIMEOUT);
         }
     }
@@ -331,7 +311,7 @@ public final class CollectBlockExecutor {
     private void checkGoal() {
         if (goalSatisfied()) {
             transitionTo(State.COMPLETE);
-            resultListener.onCompleted();
+            resultListener().onCompleted();
         } else {
             transitionTo(State.SEARCH_TARGET);
         }
@@ -378,7 +358,7 @@ public final class CollectBlockExecutor {
 
     private void fail(FailureCode failureCode) {
         transitionTo(State.FAILED);
-        resultListener.onFailed(failureCode);
+        resultListener().onFailed(failureCode);
     }
 
     private void transitionTo(State nextState) {
@@ -395,6 +375,13 @@ public final class CollectBlockExecutor {
 
     private static double square(double value) {
         return value * value;
+    }
+
+    private TaskExecutionListener resultListener() {
+        if (resultListener == null) {
+            throw new IllegalStateException("Collect executor has no result listener");
+        }
+        return resultListener;
     }
 
     /**

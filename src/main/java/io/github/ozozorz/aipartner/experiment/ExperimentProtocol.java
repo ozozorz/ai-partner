@@ -8,6 +8,21 @@ import io.github.ozozorz.aipartner.contract.SchemaOnlyContractCompiler;
 import io.github.ozozorz.aipartner.contract.TaskDefinition;
 import io.github.ozozorz.aipartner.contract.TaskDefinitionRegistry;
 import io.github.ozozorz.aipartner.contract.TaskContract;
+import io.github.ozozorz.aipartner.contract.TaskContractValidatorRegistry;
+import io.github.ozozorz.aipartner.contract.validation.CollectAndDepositContractValidator;
+import io.github.ozozorz.aipartner.contract.validation.CollectBlockContractValidator;
+import io.github.ozozorz.aipartner.contract.validation.DepositItemContractValidator;
+import io.github.ozozorz.aipartner.core.action.BreakBlockAction;
+import io.github.ozozorz.aipartner.core.action.NavigateAction;
+import io.github.ozozorz.aipartner.core.action.TransferItemAction;
+import io.github.ozozorz.aipartner.core.behavior.MaidBehaviorController;
+import io.github.ozozorz.aipartner.core.behavior.ManualDirective;
+import io.github.ozozorz.aipartner.core.event.MaidDomainEvents;
+import io.github.ozozorz.aipartner.core.order.MaidOrderService;
+import io.github.ozozorz.aipartner.core.task.MaidTaskRegistry;
+import io.github.ozozorz.aipartner.core.task.MaidTaskRuntime;
+import io.github.ozozorz.aipartner.core.task.MaidTaskSnapshot;
+import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
 import io.github.ozozorz.aipartner.evaluation.OfflineEvaluationDataset;
 import io.github.ozozorz.aipartner.evaluation.OfflineLlmEvaluationService;
 import io.github.ozozorz.aipartner.evaluation.OfflineMetricsCalculator;
@@ -15,11 +30,16 @@ import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.executor.CollectAndDepositExecutor;
 import io.github.ozozorz.aipartner.executor.CollectBlockExecutor;
 import io.github.ozozorz.aipartner.executor.DepositItemExecutor;
+import io.github.ozozorz.aipartner.gameplay.task.CollectAndDepositMaidTask;
+import io.github.ozozorz.aipartner.gameplay.task.CollectBlockMaidTask;
+import io.github.ozozorz.aipartner.gameplay.task.DepositItemMaidTask;
 import io.github.ozozorz.aipartner.job.AllowedTargets;
 import io.github.ozozorz.aipartner.job.ContainerTargets;
 import io.github.ozozorz.aipartner.job.JobType;
 import io.github.ozozorz.aipartner.llm.LlmGateway;
 import io.github.ozozorz.aipartner.logging.ExperimentLogger;
+import io.github.ozozorz.aipartner.registry.ModContractValidators;
+import io.github.ozozorz.aipartner.registry.ModTasks;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -44,6 +64,26 @@ public final class ExperimentProtocol {
             ContractCompiler.class,
             SchemaOnlyContractCompiler.class,
             AiPartnerEntity.class,
+            MaidBehaviorController.class,
+            ManualDirective.class,
+            MaidOrderService.class,
+            MaidDomainEvents.class,
+            MaidTaskRegistry.class,
+            MaidTaskRuntime.class,
+            MaidTaskSnapshot.class,
+            TaskExecutionPolicy.class,
+            TaskContractValidatorRegistry.class,
+            ModTasks.class,
+            ModContractValidators.class,
+            CollectBlockContractValidator.class,
+            DepositItemContractValidator.class,
+            CollectAndDepositContractValidator.class,
+            CollectBlockMaidTask.class,
+            DepositItemMaidTask.class,
+            CollectAndDepositMaidTask.class,
+            NavigateAction.class,
+            BreakBlockAction.class,
+            TransferItemAction.class,
             CollectBlockExecutor.class,
             DepositItemExecutor.class,
             CollectAndDepositExecutor.class,
@@ -52,6 +92,7 @@ public final class ExperimentProtocol {
             ExperimentFreezeService.class,
             ExperimentScenarioJudge.class,
             ExperimentScenarioService.class,
+            ExperimentEventBridge.class,
             VariantExecutionService.class,
             OfflineLlmEvaluationService.class,
             OfflineMetricsCalculator.class,

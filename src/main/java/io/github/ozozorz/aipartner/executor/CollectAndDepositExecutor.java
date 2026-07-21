@@ -3,7 +3,9 @@ package io.github.ozozorz.aipartner.executor;
 import io.github.ozozorz.aipartner.contract.FailureCode;
 import io.github.ozozorz.aipartner.contract.TaskContract;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
+import java.util.Objects;
 import net.minecraft.server.level.ServerLevel;
+import org.jspecify.annotations.Nullable;
 
 /**
  * `COLLECT_AND_DEPOSIT` 的固定两阶段编排器；模型不能改变阶段顺序或插入任意动作。
@@ -15,7 +17,8 @@ public final class CollectAndDepositExecutor {
     private final TaskExecutionListener collectListener = new PhaseListener(Phase.COLLECTING);
     private final TaskExecutionListener depositListener = new PhaseListener(Phase.DEPOSITING);
     private Phase phase = Phase.IDLE;
-    private TaskContract contract;
+    private @Nullable TaskContract contract;
+    private @Nullable TaskExecutionListener resultListener;
     private long deadlineGameTime;
 
     public CollectAndDepositExecutor(
@@ -31,13 +34,13 @@ public final class CollectAndDepositExecutor {
     /**
      * 从采集阶段启动新的组合契约，并共享父契约的总超时预算。
      */
-    public void start(TaskContract taskContract) {
+    public void start(TaskContract taskContract, TaskExecutionListener listener) {
         stop();
         contract = taskContract;
+        resultListener = Objects.requireNonNull(listener, "listener");
         deadlineGameTime = partner.level().getGameTime() + taskContract.failurePolicy().timeoutSeconds() * 20L;
         transitionTo(Phase.COLLECTING);
         collectExecutor.start(taskContract, collectListener);
-        partner.updateCollectProgressBaseline(collectExecutor.initialTargetCount());
     }
 
     /**
@@ -47,10 +50,12 @@ public final class CollectAndDepositExecutor {
             TaskContract taskContract,
             Phase savedPhase,
             int savedCollectInitialTargetCount,
-            int savedDepositMovedCount
+            int savedDepositMovedCount,
+            TaskExecutionListener listener
     ) {
         stop();
         contract = taskContract;
+        resultListener = Objects.requireNonNull(listener, "listener");
         deadlineGameTime = partner.level().getGameTime() + taskContract.failurePolicy().timeoutSeconds() * 20L;
         if (savedPhase == Phase.DEPOSITING) {
             transitionTo(Phase.DEPOSITING);
@@ -102,6 +107,7 @@ public final class CollectAndDepositExecutor {
         depositExecutor.stop();
         phase = Phase.IDLE;
         contract = null;
+        resultListener = null;
         deadlineGameTime = 0L;
     }
 
@@ -113,27 +119,54 @@ public final class CollectAndDepositExecutor {
         return phase;
     }
 
+    public int collectInitialTargetCount() {
+        return collectExecutor.initialTargetCount();
+    }
+
+    public int depositMovedCount() {
+        return depositExecutor.movedCount();
+    }
+
+    /**
+     * 返回当前活动子阶段的显式执行状态。
+     */
+    public String activeStateName() {
+        return phase == Phase.DEPOSITING ? depositExecutor.stateName() : collectExecutor.stateName();
+    }
+
     private void completeCollectPhase() {
         collectExecutor.stop();
         transitionTo(Phase.DEPOSITING);
-        partner.updateDepositProgress(0);
-        depositExecutor.start(contract, depositListener);
+        depositExecutor.start(requireContract(), depositListener);
     }
 
     private void completeDepositPhase() {
         transitionTo(Phase.COMPLETE);
-        partner.completeActiveContract();
+        resultListener().onCompleted();
     }
 
     private void fail(FailureCode failureCode) {
         transitionTo(Phase.FAILED);
-        partner.failActiveContract(failureCode);
+        resultListener().onFailed(failureCode);
     }
 
     private void transitionTo(Phase nextPhase) {
         phase = nextPhase;
-        partner.onCompositePhaseChanged(nextPhase);
         partner.logRuntimeEvent("composite_phase_" + nextPhase.name().toLowerCase());
+    }
+
+    private TaskContract requireContract() {
+        if (contract == null) {
+            throw new IllegalStateException("Composite executor has no active contract");
+        }
+        return contract;
+    }
+
+    private TaskExecutionListener resultListener() {
+        if (resultListener == null) {
+            throw new IllegalStateException("Composite executor has no result listener");
+        }
+        return resultListener;
     }
 
     /**

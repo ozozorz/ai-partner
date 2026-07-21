@@ -73,13 +73,34 @@ public final class TaskContract {
             ContractStatus status,
             FailureCode failureCode
     ) {
+        return restored(
+                contractId,
+                job,
+                acceptedAtEpochMillis,
+                status,
+                failureCode,
+                FailurePolicy.DEFAULT
+        );
+    }
+
+    /**
+     * 从 v0.5 存档恢复包含执行边界的契约。
+     */
+    public static TaskContract restored(
+            UUID contractId,
+            JobSpec job,
+            long acceptedAtEpochMillis,
+            ContractStatus status,
+            FailureCode failureCode,
+            FailurePolicy failurePolicy
+    ) {
         return new TaskContract(
                 contractId,
                 job,
                 List.of("owner_is_online"),
                 List.of(),
                 List.of("do_not_attack_friendly_entities"),
-                FailurePolicy.DEFAULT,
+                failurePolicy,
                 acceptedAtEpochMillis,
                 status,
                 failureCode
@@ -180,4 +201,3 @@ public final class TaskContract {
         }
     }
 }
-

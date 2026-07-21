@@ -7,9 +7,10 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.github.ozozorz.aipartner.AiPartnerMod;
-import io.github.ozozorz.aipartner.contract.ContractCompiler;
 import io.github.ozozorz.aipartner.contract.ContractDecision;
 import io.github.ozozorz.aipartner.contract.JobSpec;
+import io.github.ozozorz.aipartner.core.order.MaidOrderService;
+import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.evaluation.OfflineEvaluationService;
 import io.github.ozozorz.aipartner.evaluation.OfflineLlmEvaluationService;
@@ -803,22 +804,18 @@ public final class MaidCommand {
             return 0;
         }
 
-        ContractDecision decision = ContractCompiler.compile(partner, player, candidate);
-        ExperimentLogger.getInstance().logValidationDecision(
-                "RULE_BT",
+        ContractDecision decision = MaidOrderService.submit(
                 partner,
                 player,
-                rawInstruction,
                 candidate,
-                decision,
-                decision.failureCode().name()
+                rawInstruction,
+                TaskExecutionPolicy.DEFAULT
         );
         if (!decision.accepted()) {
             context.getSource().sendFailure(Component.translatable(decision.messageKey()));
             return 0;
         }
 
-        partner.applyContract(decision.contract(), player, rawInstruction);
         String responseKey = responseKey(candidate, decision);
         context.getSource().sendSuccess(() -> Component.translatable(responseKey), false);
         return 1;
@@ -839,21 +836,17 @@ public final class MaidCommand {
             player.sendSystemMessage(Component.translatable("message.ai-partner.not_found"));
             return false;
         }
-        ContractDecision decision = ContractCompiler.compile(partner, player, candidate);
-        ExperimentLogger.getInstance().logValidationDecision(
-                systemVariant,
+        ContractDecision decision = MaidOrderService.submit(
                 partner,
                 player,
-                rawInstruction,
                 candidate,
-                decision,
-                decision.failureCode().name()
+                rawInstruction,
+                TaskExecutionPolicy.fromLegacySource(systemVariant)
         );
         if (!decision.accepted()) {
             player.sendSystemMessage(Component.translatable(decision.messageKey()));
             return false;
         }
-        partner.applyContract(decision.contract(), player, rawInstruction, systemVariant);
         player.sendSystemMessage(Component.translatable(responseKey(candidate, decision)));
         return true;
     }

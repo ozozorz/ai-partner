@@ -4,6 +4,7 @@ import io.github.ozozorz.aipartner.command.MaidCommand;
 import io.github.ozozorz.aipartner.llm.LlmGateway;
 import io.github.ozozorz.aipartner.evaluation.OfflineLlmEvaluationService;
 import io.github.ozozorz.aipartner.experiment.ExperimentBatchRunner;
+import io.github.ozozorz.aipartner.experiment.ExperimentEventBridge;
 import io.github.ozozorz.aipartner.logging.ExperimentLogger;
 import io.github.ozozorz.aipartner.registry.ModEntities;
 import io.github.ozozorz.aipartner.registry.ModMenus;
@@ -24,6 +25,7 @@ public final class AiPartnerMod implements ModInitializer {
     public void onInitialize() {
         ModEntities.register();
         ModMenus.register();
+        ExperimentEventBridge.register();
         MaidCommand.register();
         ExperimentBatchRunner.register();
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {

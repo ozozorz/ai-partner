@@ -41,6 +41,22 @@ class TaskContractTest {
         assertEquals(FailureCode.PATH_UNREACHABLE, contract.failureCode());
     }
 
+    @Test
+    void restoredContractKeepsPersistedFailurePolicy() {
+        TaskContract.FailurePolicy policy = new TaskContract.FailurePolicy(4, 0, 150);
+
+        TaskContract contract = TaskContract.restored(
+                java.util.UUID.randomUUID(),
+                JobSpec.basic(JobType.FOLLOW),
+                123L,
+                ContractStatus.RUNNING,
+                FailureCode.NONE,
+                policy
+        );
+
+        assertEquals(policy, contract.failurePolicy());
+    }
+
     private static TaskContract newAcceptedContract() {
         return TaskContract.accepted(
                 JobSpec.basic(JobType.FOLLOW),
@@ -51,4 +67,3 @@ class TaskContractTest {
         );
     }
 }
-

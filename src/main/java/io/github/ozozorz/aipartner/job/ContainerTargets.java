@@ -1,5 +1,6 @@
 package io.github.ozozorz.aipartner.job;
 
+import io.github.ozozorz.aipartner.core.action.TransferItemAction;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -19,6 +20,7 @@ public final class ContainerTargets {
     public static final int DEFAULT_DEPOSIT_RADIUS = 16;
     public static final int MAX_DEPOSIT_RADIUS = 24;
     private static final int VERTICAL_SEARCH_RADIUS = 6;
+    private static final TransferItemAction TRANSFER_ACTION = new TransferItemAction();
 
     private ContainerTargets() {
     }
@@ -107,42 +109,6 @@ public final class ContainerTargets {
      * 尽可能插入给定物品副本，并返回实际插入数量。
      */
     public static int insert(Container container, ItemStack source) {
-        if (source.isEmpty()) {
-            return 0;
-        }
-        ItemStack remaining = source.copy();
-        int originalCount = remaining.getCount();
-
-        for (int slot = 0; slot < container.getContainerSize() && !remaining.isEmpty(); slot++) {
-            ItemStack existing = container.getItem(slot);
-            if (existing.isEmpty()
-                    || !ItemStack.isSameItemSameComponents(existing, remaining)
-                    || !container.canPlaceItem(slot, remaining)) {
-                continue;
-            }
-            int moved = Math.min(
-                    remaining.getCount(),
-                    container.getMaxStackSize(existing) - existing.getCount()
-            );
-            if (moved > 0) {
-                existing.grow(moved);
-                remaining.shrink(moved);
-            }
-        }
-
-        for (int slot = 0; slot < container.getContainerSize() && !remaining.isEmpty(); slot++) {
-            if (!container.getItem(slot).isEmpty() || !container.canPlaceItem(slot, remaining)) {
-                continue;
-            }
-            int moved = Math.min(remaining.getCount(), container.getMaxStackSize(remaining));
-            container.setItem(slot, remaining.copyWithCount(moved));
-            remaining.shrink(moved);
-        }
-
-        int inserted = originalCount - remaining.getCount();
-        if (inserted > 0) {
-            container.setChanged();
-        }
-        return inserted;
+        return TRANSFER_ACTION.insert(container, source);
     }
 }

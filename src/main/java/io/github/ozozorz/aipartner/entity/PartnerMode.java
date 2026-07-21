@@ -1,7 +1,9 @@
 package io.github.ozozorz.aipartner.entity;
 
 /**
- * 实体当前的低层行为模式；只允许确定性执行器修改。
+ * 面向客户端、命令和旧存档的有效行为投影。
+ *
+ * <p>权威状态由 ManualDirective 和 MaidTaskRuntime 分开保存，业务代码不得直接修改本枚举。</p>
  */
 public enum PartnerMode {
     IDLE,

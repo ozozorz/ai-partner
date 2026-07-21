@@ -1,14 +1,14 @@
 package io.github.ozozorz.aipartner.inventory;
 
-import io.github.ozozorz.aipartner.contract.ContractCompiler;
 import io.github.ozozorz.aipartner.contract.ContractDecision;
 import io.github.ozozorz.aipartner.contract.ContractStatus;
 import io.github.ozozorz.aipartner.contract.JobSpec;
+import io.github.ozozorz.aipartner.core.order.MaidOrderService;
+import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.entity.PartnerMenuAction;
 import io.github.ozozorz.aipartner.entity.PartnerMode;
 import io.github.ozozorz.aipartner.job.JobType;
-import io.github.ozozorz.aipartner.logging.ExperimentLogger;
 import io.github.ozozorz.aipartner.registry.ModMenus;
 import java.util.Optional;
 import net.minecraft.core.component.DataComponents;
@@ -190,22 +190,18 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
 
         JobSpec candidate = JobSpec.basic(action.get().jobType());
         String rawInstruction = "ui_button:" + action.get().name().toLowerCase();
-        ContractDecision decision = ContractCompiler.compile(partner, serverPlayer, candidate);
-        ExperimentLogger.getInstance().logValidationDecision(
-                "DIRECT_UI",
+        ContractDecision decision = MaidOrderService.submit(
                 partner,
                 serverPlayer,
-                rawInstruction,
                 candidate,
-                decision,
-                decision.failureCode().name()
+                rawInstruction,
+                TaskExecutionPolicy.standard("DIRECT_UI")
         );
         if (!decision.accepted()) {
             serverPlayer.sendSystemMessage(net.minecraft.network.chat.Component.translatable(decision.messageKey()));
             return false;
         }
 
-        partner.applyContract(decision.contract(), serverPlayer, rawInstruction, "DIRECT_UI");
         serverPlayer.sendSystemMessage(net.minecraft.network.chat.Component.translatable(action.get().responseKey()));
         return true;
     }

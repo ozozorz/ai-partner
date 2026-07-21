@@ -1,125 +1,399 @@
-# AI Partner 架构说明
+# AI Partner v0.5 架构说明
 
 ## 目标与边界
 
-AI Partner 采用 IBC（Instruction–Behavior Contract，指令—行为契约）把自然语言解释与世界动作隔离。当前只支持单玩家、单女仆和以下任务：
+v0.5 是一次不增加新玩法的纯架构重构。它保持 v0.4 的公开命令、任务语义、安全检查、实验变体和旧存档兼容，同时为后续生命周期、日程、战斗、农业、挖矿、熔炼和钓鱼建立稳定扩展点。
 
-- `FOLLOW`
-- `STAY`
-- `COLLECT_BLOCK`
-- `DEPOSIT_ITEM`
-- `COLLECT_AND_DEPOSIT`
-- `CANCEL`
+当前正式能力仍为：
 
-`COLLECT_AND_DEPOSIT` 是服务器固定的“先采集、后存箱”两阶段流程。模型只能提出目标、数量与半径，不能改变阶段顺序或插入坐标级动作。
+- FOLLOW；
+- STAY；
+- COLLECT_BLOCK；
+- DEPOSIT_ITEM；
+- COLLECT_AND_DEPOSIT；
+- CANCEL。
 
-## 数据流
+其中 FOLLOW 和 STAY 是长期手动指令，CANCEL 是订单服务操作；只有后三种工作由有限任务执行器驱动。
 
-```text
-/maid <message>
-  -> 本地 CANCEL 快速通道
-  -> Rule-BT（LLM 关闭时）或异步 LLM 网关
-  -> 严格 JobSpec JSON 校验
-  -> TaskDefinition 注册表
-  -> IBC 动态前置条件与安全验证
-  -> 验证结果驱动的语言回复
-  -> 唯一活动契约
-  -> 确定性状态机
-  -> 目标谓词/类型化终态
-  -> JSONL 实验日志
-```
+详细的长期功能规划见 [FOUNDATION_ARCHITECTURE_ROADMAP_ZH.md](./FOUNDATION_ARCHITECTURE_ROADMAP_ZH.md)。
+
+## 依赖规则
+
+核心依赖必须保持单向：
+
+~~~text
+命令 / GUI / 本地解析器 / LLM
+              ↓
+       MaidOrderService
+              ↓
+  ContractCompiler + 验证器注册表
+              ↓
+      MaidTaskRuntime
+        ↙           ↘
+行为控制器          任务注册表
+                       ↓
+                MaidTask 适配器
+                       ↓
+             可复用动作 + 旧执行器
+                       ↓
+            Minecraft 服务端世界
+~~~
+
+实验和日志位于旁路：
+
+~~~text
+核心运行时 → MaidDomainEvent → ExperimentEventBridge → ExperimentLogger
+~~~
+
+核心、实体、任务和 GUI 不允许导入 experiment、evaluation、llm 或 logging 包。
+
+## 总体架构
+
+~~~mermaid
+flowchart TB
+    subgraph Input["输入适配层"]
+        Command["/maid 命令"]
+        Menu["女仆 GUI"]
+        Parser["规则解析器"]
+        LLM["可选 LLM"]
+    end
+
+    Order["MaidOrderService"]
+    Compiler["ContractCompiler<br/>通用验证"]
+    Validators["TaskContractValidatorRegistry<br/>任务专属验证"]
+    Runtime["MaidTaskRuntime<br/>唯一活动契约"]
+    Behavior["MaidBehaviorController<br/>指令与显示模式"]
+    Tasks["MaidTaskRegistry<br/>任务 ID 与工厂"]
+
+    subgraph Gameplay["有限任务适配层"]
+        Collect["CollectBlockMaidTask"]
+        Deposit["DepositItemMaidTask"]
+        Composite["CollectAndDepositMaidTask"]
+    end
+
+    Actions["MaidActions<br/>导航、破坏、物品转移"]
+    Minecraft["实体、世界、导航、容器"]
+    Events["MaidDomainEvents"]
+    Research["实验、评测和日志"]
+
+    Command --> Order
+    Menu --> Order
+    Parser --> Order
+    LLM -. "只产生 JobSpec" .-> Order
+    Order --> Compiler
+    Compiler --> Validators
+    Order --> Runtime
+    Runtime --> Behavior
+    Runtime --> Tasks
+    Tasks --> Gameplay
+    Gameplay --> Actions
+    Actions --> Minecraft
+    Runtime --> Events
+    Order --> Events
+    Events -. "只读观察" .-> Research
+~~~
 
 ## 主要模块
 
-| 模块 | 入口 | 作用 |
+| 模块 | 入口 | 职责 |
 |---|---|---|
-| 实体与持久化 | `entity/AiPartnerEntity` | 主人、36 格背包、原生装备、唯一活动契约、同步行为模式 |
-| 容器与 UI | `inventory/AiPartnerMenu`、`client/screen/AiPartnerScreen` | 服务端权威物品移动、状态同步和白名单行为按钮 |
-| 客户端表现 | `client/render/AiPartnerRenderer` | 复用内置 `PLAYER_SLIM`、官方 Alex 贴图、护甲与手持物层 |
-| 核心行为 | `entity/goal`、`entity/navigation` | 空闲漫步、观察、开关门和带滞回/延迟传送的主人跟随 |
-| 任务定义 | `contract/TaskDefinitionRegistry` | 冻结任务能力、参数边界和目标白名单 |
-| 契约编译 | `contract/ContractCompiler` | 权限、维度、工具、目标、箱子和容量验证 |
-| 收集执行器 | `executor/CollectBlockExecutor` | 有界搜索、寻路、检查、破坏、拾取和目标判定 |
-| 存放执行器 | `executor/DepositItemExecutor` | 箱子搜索、权限/容量复检和精确物品转移 |
-| 组合编排器 | `executor/CollectAndDepositExecutor` | 复用两个单阶段状态机、保持一个父契约并控制阶段切换 |
-| 模型网关 | `llm/LlmGateway` | 异步 HTTP、超时、最多一次重试、Token/延迟采集 |
-| 结构校验 | `llm/JobSpecJsonCodec` | 拒绝代码块、额外字段、错误类型和越界参数 |
-| 实验变体 | `experiment/SystemVariant`、`VariantExecutionService` | 固定 Rule-BT、LLM-Schema、Maid-IBC 与 A2 的模块开关和统一提交入口 |
-| 实验日志 | `logging/ExperimentLogger` | 单线程异步 JSONL 和服务器停止时 flush |
-| 场景系统 | `experiment/*` | 18 个冻结场景、有界重置、预设扰动、独立判定、批处理检查点和冻结锁 |
-| 离线评测 | `evaluation/*` | 72 条冻结中文金标、固定模型限速/重试/恢复/费用保护和自动指标 |
+| 实体外壳 | entity/AiPartnerEntity | Minecraft 生命周期、同步模式、背包、装备和交互 |
+| 行为控制器 | core/behavior/MaidBehaviorController | 手动指令、任务显示模式和 GUI 暂停 |
+| 手动指令 | core/behavior/ManualDirective | NONE、FOLLOW、STAY、预留 RETURN_HOME |
+| 订单服务 | core/order/MaidOrderService | 输入端共用的验证、事件和调度入口 |
+| 契约编译器 | contract/ContractCompiler | 所有权、维度、任务定义和参数形状验证 |
+| 验证器注册表 | contract/TaskContractValidatorRegistry | 任务专属前置条件，无中央任务 switch |
+| 任务运行时 | core/task/MaidTaskRuntime | 应用、替换、取消、tick、暂停、终态和恢复 |
+| 任务接口 | core/task/MaidTask | 统一 start、tick、pause、restore、snapshot 和 stop |
+| 任务注册表 | core/task/MaidTaskRegistry | JobType/稳定任务 ID 到实例工厂的映射 |
+| 任务快照 | core/task/MaidTaskSnapshot | 版本化整数、长整数和字符串状态 |
+| 执行策略 | core/task/TaskExecutionPolicy | 运行时监控和局部恢复能力，不依赖实验枚举 |
+| 基础动作 | core/action | 导航、方块破坏和容器物品转移 |
+| 任务适配器 | gameplay/task | 把 v0.4 状态机接入统一 MaidTask 生命周期 |
+| 领域事件 | core/event | 验证和契约生命周期的只读事件 |
+| 实验桥接 | experiment/ExperimentEventBridge | 把领域事件转换为冻结实验日志 |
+
+## 实体职责
+
+AiPartnerEntity 不再：
+
+- 持有 CollectBlockExecutor、DepositItemExecutor 或 CollectAndDepositExecutor；
+- 根据 JobType 切换具体任务；
+- 保存任务专属进度字段；
+- 解析 SystemVariant；
+- 直接调用 ExperimentLogger；
+- 自行控制契约生命周期。
+
+实体继续负责：
+
+- 原版 TamableAnimal 主人关系；
+- 同步有效 PartnerMode；
+- 36 格 v0.4 背包和原生装备；
+- 右键、GUI、死亡、掉落和存档钩子；
+- Goal 和 Navigation 注册；
+- 把服务端 tick 委托给 MaidTaskRuntime。
+
+PartnerMode 只是一项面向客户端、命令和旧存档的显示投影，不再是完整权威状态。
+
+## 行为状态
+
+v0.5 将权威状态拆为：
+
+| 状态 | 保存位置 | 说明 |
+|---|---|---|
+| ManualDirective | MaidBehaviorController | FOLLOW、STAY 等长期覆盖 |
+| ActiveTask | MaidTaskRuntime | 唯一有限任务 |
+| PartnerMode | SynchedEntityData | 客户端显示投影 |
+| inventoryMenuOpen | MaidBehaviorController | 不持久化的暂停覆盖 |
+
+### FOLLOW
+
+- 契约进入 RUNNING；
+- ManualDirective 设置为 FOLLOW；
+- Follow Goal 根据 5 格启动、3 格停止的滞回区间工作；
+- 寻路持续卡住且距离至少 12 格后尝试安全传送；
+- GUI 打开时暂停移动；
+- 主人失效时按既有规则失败。
+
+### STAY
+
+- 契约进入 RUNNING；
+- ManualDirective 设置为 STAY；
+- 立即停止导航；
+- 空闲漫步被禁止。
+
+### CANCEL
+
+CANCEL 仍保留在外部 Job DSL 中，以兼容命令、解析器和实验数据，但不注册 MaidTask：
+
+~~~text
+取消旧契约
+→ 清除任务和手动指令
+→ 停止导航
+→ 创建 CANCEL 契约审计记录
+→ RUNNING
+→ 立即 COMPLETED
+~~~
+
+## 订单与验证
+
+命令、GUI 和自然语言入口统一调用 MaidOrderService。
+
+处理流程：
+
+~~~text
+JobSpec
+→ ContractCompiler 通用检查
+→ TaskDefinitionRegistry 参数边界
+→ TaskContractValidatorRegistry 专属检查
+→ OrderValidationEvent
+→ 接受时交给 MaidTaskRuntime
+~~~
+
+ContractCompiler 不再包含按任务增长的大型 switch。当前注册：
+
+- FOLLOW 基础指令验证；
+- STAY 基础指令验证；
+- CANCEL 基础操作验证；
+- CollectBlockContractValidator；
+- DepositItemContractValidator；
+- CollectAndDepositContractValidator。
+
+新增任务时应同时注册：
+
+1. TaskDefinition；
+2. TaskContractValidator；
+3. 有限工作才需要 MaidTask 工厂；
+4. 命令或 GUI 入口。
+
+不需要修改 AiPartnerEntity 或 MaidTaskRuntime。
+
+## 任务生命周期
+
+MaidTask 统一提供：
+
+~~~text
+id
+start(context)
+restore(context, snapshot)
+tick(context)
+pauseForTick()
+stop()
+isRunning()
+displayedMode()
+executionState()
+snapshot()
+~~~
+
+MaidTaskRuntime 保证同一时刻最多存在一个活动任务。
+
+任务替换：
+
+~~~text
+新契约通过验证
+→ 旧契约标记 CANCELLED
+→ 停止旧任务和导航
+→ 创建注册任务
+→ 新契约标记 RUNNING
+~~~
+
+任务终态由 MaidTaskResultSink 回报。结果回调绑定契约 UUID，因此旧执行器的迟到回调不能结束新契约。
+
+## 当前有限任务
+
+### COLLECT_BLOCK
+
+~~~text
+SEARCH_TARGET
+→ NAVIGATE
+→ CHECK_TARGET
+→ BREAK_BLOCK
+→ PICK_UP
+→ CHECK_GOAL
+→ SEARCH_TARGET / COMPLETE
+~~~
+
+### DEPOSIT_ITEM
+
+~~~text
+SEARCH_CONTAINER
+→ NAVIGATE
+→ CHECK_CONTAINER
+→ DEPOSIT
+→ CHECK_GOAL
+→ SEARCH_CONTAINER / COMPLETE
+~~~
+
+### COLLECT_AND_DEPOSIT
+
+~~~text
+COLLECTING
+→ 采集目标成立
+→ DEPOSITING
+→ 存放目标成立
+→ COMPLETE
+~~~
+
+组合任务只有一个父契约和一个总超时；输入端不能改变阶段顺序。
+
+三个 v0.4 执行器仍保留内部状态机，但只能通过 gameplay/task 适配器被任务注册表创建。后续工作可以逐步迁移到更细的动作组合，而无需再次修改实体。
+
+## 基础动作
+
+v0.5 已抽取当前任务真正复用的动作：
+
+- NavigateAction：向方块中心导航和停止导航；
+- BreakBlockAction：主手挥动和以女仆为破坏者修改方块；
+- TransferItemAction：在容器间守恒地移动精确数量物品；
+- MaidActions：一个任务实例的动作集合。
+
+尚未有实际玩法调用的放置、交互和装备租约不会预先建立空实现；在对应 v0.6/v0.7 功能落地时加入。
+
+## 暂停、恢复和异常
+
+- GUI 打开时停止导航；
+- 活动任务每 tick 延长自己的旧版截止时间，因此 GUI 操作不消耗任务预算；
+- GUI 关闭后任务从原状态继续并在动作前复验；
+- 任务抛出未预期运行时异常时，运行时记录错误并以 INTERNAL_ERROR 安全失败；
+- 目标消失、路径失败等仍根据 TaskExecutionPolicy 决定局部恢复或直接失败；
+- 运行时监控和局部恢复能力已与 SystemVariant 解耦；
+- v0.4 变体字符串只在旧存档迁移函数中出现。
+
+## 持久化
+
+实体写入 AiPartnerDataVersion = 1。
+
+### 通用字段
+
+~~~text
+ManualDirective
+PartnerMode
+CurrentOrderSource
+RuntimeMonitoringEnabled
+LocalRecoveryEnabled
+RuntimeRecoveryCount
+ActiveTaskId
+ActiveTaskSnapshotVersion
+ActiveTaskSnapshot*
+~~~
+
+### 契约字段
+
+~~~text
+ContractId
+ContractJobType
+ContractTarget
+ContractQuantity
+ContractRadius
+ContractStatus
+ContractFailureCode
+ContractAcceptedAt
+ContractMaxLocalRetries
+ContractMaxLlmReplans
+ContractTimeoutSeconds
+~~~
+
+### v0.4 兼容字段
+
+迁移期继续读写：
+
+~~~text
+PartnerMode
+CollectInitialTargetCount
+DepositMovedCount
+CompositePhase
+CurrentSystemVariant
+~~~
+
+加载规则：
+
+1. 优先读取 ActiveTaskId 和通用任务快照；
+2. 缺少时按 ContractJobType 创建注册任务；
+3. 调用任务自己的 readLegacySnapshot 读取 v0.4 进度；
+4. FOLLOW/STAY 从旧 PartnerMode 迁移为 ManualDirective；
+5. 未知任务安全标记 INTERNAL_ERROR；
+6. 首次实体 tick 延迟恢复底层执行器；
+7. 如果恢复前再次保存，保留尚未应用的原快照。
+
+任务失败策略现在也会完整持久化，不再在重启后无条件回退默认值。
+
+## 领域事件与实验隔离
+
+核心发布两类事件：
+
+- OrderValidationEvent；
+- ContractLifecycleEvent。
+
+ExperimentEventBridge 是唯一把这些事件交给 ExperimentLogger 的适配器。监听器异常会被隔离，不能中断任务。
+
+命令中的模型调用、批处理和离线评测仍属于外围研究工具；核心任务运行不导入这些包。v0.4 协议继续冻结，v0.5 的实验实现指纹已纳入新的运行时、注册表和任务适配器。
 
 ## 线程模型
 
-- Minecraft 世界读取、契约编译和任务调度只在服务器线程执行。
-- HTTP 请求、响应读取和 JSON 初步解析在 `HttpClient` 异步链中执行。
-- 模型结果通过 `MinecraftServer.execute` 回到服务器线程；玩家离线时不会调度任务。
-- 日志写入使用独立单线程守护执行器；服务器停止事件会等待排队日志落盘。
-- 游戏批处理由服务器 tick 驱动；离线模型批次使用单线程调度器并在每次请求前持久化费用预留。
-- 同一玩家的新模型请求会取消旧请求；`CANCEL` 永远优先使用本地即时路径。
+- 世界读取、契约验证、任务调度和领域事件发布发生在服务器线程；
+- LLM HTTP 和响应读取仍在异步链中执行；
+- 模型结果通过 MinecraftServer.execute 回到服务器线程；
+- 日志使用独立单线程执行器；
+- 同一玩家的新模型请求继续取消旧请求；
+- CANCEL 始终优先走本地即时解析；
+- MaidTaskRuntime 不创建后台线程。
 
-## 状态机
+## 安全边界
 
-`COLLECT_BLOCK`：
+- 所有入口执行主人、维度、参数形状和任务专属验证；
+- 所有世界修改在实际动作前重新检查；
+- 采集仍受 mobGriefing、目标白名单、工具、背包和原点半径限制；
+- 存放仍只允许主人可打开、未阻挡且容量足够的普通单箱；
+- TransferItemAction 只按实际插入量缩减源堆栈；
+- 客户端状态和按钮不能直接修改实体契约；
+- 模型不能提交坐标、代码或逐 tick 动作。
 
-```text
-SEARCH_TARGET -> NAVIGATE -> CHECK_TARGET -> BREAK_BLOCK
-              -> PICK_UP -> CHECK_GOAL -> SEARCH_TARGET / COMPLETE
-```
+## v0.5 明确未改变的内容
 
-`DEPOSIT_ITEM`：
-
-```text
-SEARCH_CONTAINER -> NAVIGATE -> CHECK_CONTAINER -> DEPOSIT
-                 -> CHECK_GOAL -> SEARCH_CONTAINER / COMPLETE
-```
-
-`COLLECT_AND_DEPOSIT`：
-
-```text
-COLLECTING（复用 COLLECT_BLOCK）
-  -> 采集目标成立
-  -> DEPOSITING（复用 DEPOSIT_ITEM）
-  -> 箱子增量目标成立
-  -> COMPLETE
-```
-
-组合任务只拥有一个父契约和一个 90 秒总预算。子执行器通过类型化监听器返回阶段结果，不会在采集完成时提前完成父契约；阶段、采集基线和已存数量都会写入实体存档。
-
-每个执行器都有 90 秒默认超时、有限本地重试、原点半径监控和类型化失败码。收集搜索每 tick 最多检查 1024 个坐标，避免无界扫描。
-
-## 生物行为分层
-
-行为设计参考了 TouhouLittleMaid 的 `EntityMaid`、`MaidBrain` 和导航实现所采用的分层原则：持续可用的核心行为与任务专属行为分开，空闲阶段在观察、短距离漫步和静止之间切换，导航统一处理门与水面。当前 Fabric 实现没有复制其 Forge Brain 代码，而是用 26.1.2 原版 Goal/Navigation API 做了小型适配：
-
-- 核心层：漂浮、开关木门、观察、空闲漫步；
-- 契约层：跟随、待命、收集和存放；
-- 跟随采用 5 格启动、3 格停止的滞回区间，优先寻路，持续卡住且远距离时才尝试传送；
-- UI 打开期间暂停移动与任务超时，关闭后回到原契约状态。
-
-## 白名单与安全规则
-
-- 收集与存放只支持 `minecraft:oak_log`、`minecraft:birch_log` 和 `minecraft:spruce_log`。
-- 数量范围为 1—64，搜索半径范围为 1—24。
-- 收集需要女仆背包中有斧头，并受 `mobGriefing` 游戏规则约束。
-- 存放只使用未阻挡、主人可打开且容量足够的普通单箱；不操作锁定箱子和双箱。
-- 女仆没有攻击目标，也不会从模型接收坐标级动作或代码。
-- 背包操作期间暂停导航和任务超时计时；关闭 UI 后，执行器会重新检查工具、物品和容量前置条件。
-- UI 行为按钮只发送固定编号；主人身份、距离和契约前置条件仍由服务端验证。
-
-## 持久化与日志
-
-实体存档保存主人、行为模式、背包、契约 ID/任务/状态/失败码、组合阶段、收集基线、存放进度和实验系统变体。运行时日志位于：
-
-```text
-logs/ai-partner/episodes.jsonl
-```
-
-日志事件包括场景重置/扰动、模型结果、执行前验证、契约生命周期和执行器状态转换。活动实验中的全部事件共享 `episode_id`，并附带批次、`scenario_id`、期望终态、世界种子和维度。模型密钥不会进入配置文件、Prompt 或日志。
-
-管理员命令 `/maid experiment reset <scenario>` 只重建锚点周围 21×8×21 区域；`disturb` 只执行注册表声明的方块删除。批处理按 tick 自动重置、提交、扰动、判定并写原子检查点；离线服务按冻结 case 顺序生成预测与 JVR/意图/槽位/CCR/URR/FRR 指标。
-
-## 当前限制
-
-- 没有通用领地模组接口；第一版只依赖主人、箱锁、白名单、范围和 `mobGriefing` 约束。
-- 尚未加入自动化客户端截图回归；视觉和交互仍需在开发客户端中进行实机验收。
+- 背包仍为 v0.4 的 36 个普通储物格加护甲和副手，主手迁移属于 v0.6；
+- 仍为默认单玩家、单女仆查找逻辑；
+- 仍只支持三种原木；
+- 没有日程、回家、睡眠、战斗、农业、挖矿、熔炼或钓鱼；
+- 没有通用模组权限/领地兼容；
+- 没有新增 LLM 能力；
+- 没有改变 v0.4 任务数值和实验场景。

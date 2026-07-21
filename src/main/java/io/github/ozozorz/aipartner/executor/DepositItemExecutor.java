@@ -2,6 +2,7 @@ package io.github.ozozorz.aipartner.executor;
 
 import io.github.ozozorz.aipartner.contract.FailureCode;
 import io.github.ozozorz.aipartner.contract.TaskContract;
+import io.github.ozozorz.aipartner.core.action.MaidActions;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.job.AllowedTargets;
 import io.github.ozozorz.aipartner.job.ContainerTargets;
@@ -15,6 +16,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import org.jspecify.annotations.Nullable;
 
 /**
  * `DEPOSIT_ITEM` 的显式状态机，只向主人可访问的普通单箱移动白名单物品。
@@ -25,9 +27,9 @@ public final class DepositItemExecutor {
     private static final double INTERACTION_DISTANCE_SQUARED = 9.0;
 
     private final AiPartnerEntity partner;
-    private final TaskExecutionListener defaultListener;
+    private final MaidActions actions;
     private final Set<Long> unavailableContainers = new HashSet<>();
-    private TaskExecutionListener resultListener;
+    private @Nullable TaskExecutionListener resultListener;
     private State state = State.IDLE;
     private TaskContract contract;
     private Item targetItem;
@@ -42,15 +44,7 @@ public final class DepositItemExecutor {
 
     public DepositItemExecutor(AiPartnerEntity partner) {
         this.partner = partner;
-        this.defaultListener = TaskExecutionListener.activeContract(partner);
-        this.resultListener = defaultListener;
-    }
-
-    /**
-     * 启动新的存放契约。
-     */
-    public void start(TaskContract taskContract) {
-        start(taskContract, 0, defaultListener);
+        this.actions = MaidActions.create(partner);
     }
 
     /**
@@ -58,13 +52,6 @@ public final class DepositItemExecutor {
      */
     public void start(TaskContract taskContract, TaskExecutionListener listener) {
         start(taskContract, 0, listener);
-    }
-
-    /**
-     * 从实体存档恢复已经完成的部分存放数量。
-     */
-    public void restore(TaskContract taskContract, int savedMovedCount) {
-        start(taskContract, savedMovedCount, defaultListener);
     }
 
     /**
@@ -80,7 +67,7 @@ public final class DepositItemExecutor {
         contract = taskContract;
         targetItem = AllowedTargets.resolveDepositableItem(taskContract.job().target()).orElse(null);
         if (targetItem == null) {
-            resultListener.onFailed(FailureCode.INTERNAL_ERROR);
+            listener.onFailed(FailureCode.INTERNAL_ERROR);
             return;
         }
         origin = partner.blockPosition().immutable();
@@ -160,7 +147,7 @@ public final class DepositItemExecutor {
         deadlineGameTime = 0L;
         sawFullContainer = false;
         unavailableContainers.clear();
-        resultListener = defaultListener;
+        resultListener = null;
     }
 
     private void searchForContainer(ServerLevel level) {
@@ -211,20 +198,14 @@ public final class DepositItemExecutor {
             return;
         }
         if (distanceToContainerSquared() <= INTERACTION_DISTANCE_SQUARED) {
-            partner.getNavigation().stop();
+            actions.navigation().stop();
             transitionTo(State.CHECK_CONTAINER);
             return;
         }
         if (stateTicks % 10 != 1) {
             return;
         }
-        boolean pathStarted = partner.getNavigation().moveTo(
-                containerPosition.getX() + 0.5,
-                containerPosition.getY(),
-                containerPosition.getZ() + 0.5,
-                1,
-                1.0
-        );
+        boolean pathStarted = actions.navigation().moveTo(containerPosition, 1.0);
         pathFailures = pathStarted ? 0 : pathFailures + 1;
         if (pathFailures > partner.getMaximumLocalRetries()) {
             handleUnavailableContainer(FailureCode.PATH_UNREACHABLE);
@@ -265,26 +246,13 @@ public final class DepositItemExecutor {
         }
 
         int remainingNeeded = contract.job().quantity() - movedCount;
-        for (int slot = 0; slot < partner.getInventory().getContainerSize() && remainingNeeded > 0; slot++) {
-            ItemStack source = partner.getInventory().getItem(slot);
-            if (source.isEmpty() || source.getItem() != targetItem) {
-                continue;
-            }
-            ItemStack offered = source.copyWithCount(Math.min(source.getCount(), remainingNeeded));
-            int inserted = ContainerTargets.insert(container, offered);
-            if (inserted <= 0) {
-                continue;
-            }
-            source.shrink(inserted);
-            if (source.isEmpty()) {
-                partner.getInventory().setItem(slot, ItemStack.EMPTY);
-            } else {
-                partner.getInventory().setChanged();
-            }
-            movedCount += inserted;
-            remainingNeeded -= inserted;
-            partner.updateDepositProgress(movedCount);
-        }
+        int inserted = actions.transferItem().moveMatching(
+                partner.getInventory(),
+                container,
+                targetItem,
+                remainingNeeded
+        );
+        movedCount += inserted;
 
         if (movedCount >= contract.job().quantity()) {
             transitionTo(State.CHECK_GOAL);
@@ -306,7 +274,7 @@ public final class DepositItemExecutor {
 
     private void complete() {
         transitionTo(State.COMPLETE);
-        resultListener.onCompleted();
+        resultListener().onCompleted();
     }
 
     private boolean containerStillUsable(ServerLevel level) {
@@ -356,7 +324,7 @@ public final class DepositItemExecutor {
 
     private void fail(FailureCode failureCode) {
         transitionTo(State.FAILED);
-        resultListener.onFailed(failureCode);
+        resultListener().onFailed(failureCode);
     }
 
     private void transitionTo(State nextState) {
@@ -373,6 +341,13 @@ public final class DepositItemExecutor {
 
     private static double square(double value) {
         return value * value;
+    }
+
+    private TaskExecutionListener resultListener() {
+        if (resultListener == null) {
+            throw new IllegalStateException("Deposit executor has no result listener");
+        }
+        return resultListener;
     }
 
     /**

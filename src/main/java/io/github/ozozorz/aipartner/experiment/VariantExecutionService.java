@@ -5,6 +5,8 @@ import io.github.ozozorz.aipartner.contract.ContractDecision;
 import io.github.ozozorz.aipartner.contract.JobSpec;
 import io.github.ozozorz.aipartner.contract.SchemaOnlyContractCompiler;
 import io.github.ozozorz.aipartner.contract.TaskContract;
+import io.github.ozozorz.aipartner.core.order.MaidOrderService;
+import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.llm.DialogueAct;
 import io.github.ozozorz.aipartner.llm.LlmCallResult;
@@ -152,14 +154,17 @@ public final class VariantExecutionService {
         ContractDecision decision = variant.semanticValidationEnabled()
                 ? ContractCompiler.compile(partner, player, candidate)
                 : SchemaOnlyContractCompiler.compile(candidate);
-        ExperimentLogger.getInstance().logValidationDecision(
-                variant.name(),
+        MaidOrderService.submitValidated(
                 partner,
                 player,
-                instruction,
                 candidate,
+                instruction,
                 decision,
-                decision.failureCode().name()
+                new TaskExecutionPolicy(
+                        variant.name(),
+                        variant.runtimeMonitoringEnabled(),
+                        variant.localRecoveryEnabled()
+                )
         );
         if (!decision.accepted() || decision.contract() == null) {
             return SubmissionResult.notScheduled(
@@ -171,7 +176,6 @@ public final class VariantExecutionService {
             );
         }
 
-        partner.applyContract(decision.contract(), player, instruction, variant.name());
         return new SubmissionResult(
                 variant,
                 DialogueAct.PROPOSE_JOB,
