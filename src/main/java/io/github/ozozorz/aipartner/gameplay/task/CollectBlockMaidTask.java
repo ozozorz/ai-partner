@@ -6,6 +6,8 @@ import io.github.ozozorz.aipartner.core.task.MaidTaskSnapshot;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.entity.PartnerMode;
 import io.github.ozozorz.aipartner.executor.CollectBlockExecutor;
+import io.github.ozozorz.aipartner.inventory.EquipmentLease;
+import net.minecraft.tags.ItemTags;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
@@ -16,10 +18,14 @@ import net.minecraft.world.level.storage.ValueOutput;
 public final class CollectBlockMaidTask implements MaidTask {
     public static final String ID = "collect_block";
     private static final String INITIAL_TARGET_COUNT = "initialTargetCount";
+    private static final String TOOL_LEASE_SOURCE_SLOT = "toolLeaseSourceSlot";
 
+    private final AiPartnerEntity partner;
     private final CollectBlockExecutor executor;
+    private EquipmentLease toolLease;
 
     public CollectBlockMaidTask(AiPartnerEntity partner) {
+        this.partner = partner;
         executor = new CollectBlockExecutor(partner);
     }
 
@@ -30,11 +36,17 @@ public final class CollectBlockMaidTask implements MaidTask {
 
     @Override
     public void start(MaidTaskContext context) {
+        toolLease = EquipmentLease.acquire(partner, CollectBlockMaidTask::isAxe).orElse(null);
         executor.start(context.contract(), new ExecutorResultAdapter(context.resultSink()));
     }
 
     @Override
     public void restore(MaidTaskContext context, MaidTaskSnapshot snapshot) {
+        toolLease = EquipmentLease.restore(
+                partner,
+                CollectBlockMaidTask::isAxe,
+                snapshot.integer(TOOL_LEASE_SOURCE_SLOT, EquipmentLease.NO_SOURCE_SLOT)
+        ).orElse(null);
         executor.restore(
                 context.contract(),
                 snapshot.integer(INITIAL_TARGET_COUNT, 0),
@@ -55,6 +67,10 @@ public final class CollectBlockMaidTask implements MaidTask {
     @Override
     public void stop() {
         executor.stop();
+        if (toolLease != null) {
+            toolLease.close();
+            toolLease = null;
+        }
     }
 
     @Override
@@ -76,6 +92,10 @@ public final class CollectBlockMaidTask implements MaidTask {
     public MaidTaskSnapshot snapshot() {
         return MaidTaskSnapshot.builder(1)
                 .putInt(INITIAL_TARGET_COUNT, executor.initialTargetCount())
+                .putInt(
+                        TOOL_LEASE_SOURCE_SLOT,
+                        toolLease == null ? EquipmentLease.NO_SOURCE_SLOT : toolLease.sourceSlot()
+                )
                 .build();
     }
 
@@ -83,6 +103,7 @@ public final class CollectBlockMaidTask implements MaidTask {
     public MaidTaskSnapshot readLegacySnapshot(ValueInput input) {
         return MaidTaskSnapshot.builder(1)
                 .putInt(INITIAL_TARGET_COUNT, input.getIntOr("CollectInitialTargetCount", 0))
+                .putInt(TOOL_LEASE_SOURCE_SLOT, EquipmentLease.NO_SOURCE_SLOT)
                 .build();
     }
 
@@ -94,5 +115,9 @@ public final class CollectBlockMaidTask implements MaidTask {
     @Override
     public boolean acceptsPickup(Item item) {
         return executor.accepts(item);
+    }
+
+    private static boolean isAxe(net.minecraft.world.item.ItemStack stack) {
+        return !stack.isEmpty() && stack.typeHolder().is(ItemTags.AXES);
     }
 }

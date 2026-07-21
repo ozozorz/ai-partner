@@ -6,6 +6,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * 统一执行女仆挥手和服务端方块破坏，便于后续工作共享安全检查入口。
@@ -25,6 +26,17 @@ public final class BreakBlockAction {
      * 使用女仆作为破坏者执行一次原版方块修改。
      */
     public boolean destroy(ServerLevel level, BlockPos position) {
-        return level.destroyBlock(position, false, partner, Block.UPDATE_LIMIT);
+        BlockState state = level.getBlockState(position);
+        boolean destroyed = level.destroyBlock(position, false, partner, Block.UPDATE_LIMIT);
+        if (destroyed && !partner.getMainHandItem().isEmpty()) {
+            partner.getMainHandItem().getItem().mineBlock(
+                    partner.getMainHandItem(),
+                    level,
+                    state,
+                    position,
+                    partner
+            );
+        }
+        return destroyed;
     }
 }

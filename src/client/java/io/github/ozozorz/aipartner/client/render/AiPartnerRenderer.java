@@ -1,6 +1,8 @@
 package io.github.ozozorz.aipartner.client.render;
 
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
+import io.github.ozozorz.aipartner.client.skin.SkinTextureCache;
+import net.minecraft.core.ClientAsset;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.model.player.PlayerModel;
@@ -11,6 +13,9 @@ import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.entity.EntityAttachment;
+import net.minecraft.world.entity.player.PlayerModelType;
+import net.minecraft.world.entity.player.PlayerSkin;
 import net.minecraft.world.item.ItemStack;
 
 /**
@@ -61,10 +66,27 @@ public final class AiPartnerRenderer
         state.showLeftSleeve = true;
         state.showRightSleeve = true;
         state.showCape = false;
+        Identifier bodyTexture = SkinTextureCache.location(entity.getSkinHash()).orElse(ALEX_TEXTURE);
+        state.skin = PlayerSkin.insecure(
+                new ClientAsset.DownloadedTexture(bodyTexture, "ai-partner-local"),
+                null,
+                null,
+                PlayerModelType.SLIM
+        );
+        entity.getActiveSpeechBubble().ifPresent(bubble -> {
+            state.scoreText = bubble;
+            if (state.nameTagAttachment == null) {
+                state.nameTagAttachment = entity.getAttachments().getNullable(
+                        EntityAttachment.NAME_TAG,
+                        0,
+                        entity.getYRot(partialTicks)
+                );
+            }
+        });
     }
 
     @Override
     public Identifier getTextureLocation(AvatarRenderState state) {
-        return ALEX_TEXTURE;
+        return state.skin.body().texturePath();
     }
 }

@@ -2,6 +2,7 @@ package io.github.ozozorz.aipartner.client;
 
 import io.github.ozozorz.aipartner.client.render.AiPartnerRenderer;
 import io.github.ozozorz.aipartner.client.screen.AiPartnerScreen;
+import io.github.ozozorz.aipartner.client.skin.MaidSkinClient;
 import io.github.ozozorz.aipartner.registry.ModEntities;
 import io.github.ozozorz.aipartner.registry.ModMenus;
 import net.fabricmc.api.ClientModInitializer;
@@ -16,5 +17,6 @@ public final class AiPartnerClient implements ClientModInitializer {
     public void onInitializeClient() {
         EntityRenderers.register(ModEntities.AI_PARTNER, AiPartnerRenderer::new);
         MenuScreens.register(ModMenus.AI_PARTNER, AiPartnerScreen::new);
+        MaidSkinClient.register();
     }
 }

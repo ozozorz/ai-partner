@@ -25,5 +25,6 @@ class ManualDirectiveTest {
         assertEquals(ManualDirective.STAY, ManualDirective.fromLegacyMode(PartnerMode.STAYING));
         assertEquals(ManualDirective.NONE, ManualDirective.fromLegacyMode(PartnerMode.COLLECTING));
         assertEquals(ManualDirective.NONE, ManualDirective.fromName("UNKNOWN"));
+        assertEquals(PartnerMode.RETURNING_HOME, ManualDirective.RETURN_HOME.displayedMode());
     }
 }

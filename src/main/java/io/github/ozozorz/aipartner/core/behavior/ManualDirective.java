@@ -15,7 +15,7 @@ public enum ManualDirective {
     NONE(null, PartnerMode.IDLE),
     FOLLOW(JobType.FOLLOW, PartnerMode.FOLLOWING),
     STAY(JobType.STAY, PartnerMode.STAYING),
-    RETURN_HOME(null, PartnerMode.IDLE);
+    RETURN_HOME(null, PartnerMode.RETURNING_HOME);
 
     private final @Nullable JobType sourceJobType;
     private final PartnerMode displayedMode;

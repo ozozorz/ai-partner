@@ -8,6 +8,8 @@ import io.github.ozozorz.aipartner.entity.PartnerMode;
 import io.github.ozozorz.aipartner.executor.CollectAndDepositExecutor;
 import io.github.ozozorz.aipartner.executor.CollectBlockExecutor;
 import io.github.ozozorz.aipartner.executor.DepositItemExecutor;
+import io.github.ozozorz.aipartner.inventory.EquipmentLease;
+import net.minecraft.tags.ItemTags;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
@@ -20,12 +22,16 @@ public final class CollectAndDepositMaidTask implements MaidTask {
     private static final String PHASE = "phase";
     private static final String COLLECT_INITIAL_TARGET_COUNT = "collectInitialTargetCount";
     private static final String DEPOSIT_MOVED_COUNT = "depositMovedCount";
+    private static final String TOOL_LEASE_SOURCE_SLOT = "toolLeaseSourceSlot";
 
+    private final AiPartnerEntity partner;
     private final CollectBlockExecutor collectExecutor;
     private final DepositItemExecutor depositExecutor;
     private final CollectAndDepositExecutor executor;
+    private EquipmentLease toolLease;
 
     public CollectAndDepositMaidTask(AiPartnerEntity partner) {
+        this.partner = partner;
         collectExecutor = new CollectBlockExecutor(partner);
         depositExecutor = new DepositItemExecutor(partner);
         executor = new CollectAndDepositExecutor(partner, collectExecutor, depositExecutor);
@@ -38,17 +44,26 @@ public final class CollectAndDepositMaidTask implements MaidTask {
 
     @Override
     public void start(MaidTaskContext context) {
+        toolLease = EquipmentLease.acquire(partner, CollectAndDepositMaidTask::isAxe).orElse(null);
         executor.start(context.contract(), new ExecutorResultAdapter(context.resultSink()));
     }
 
     @Override
     public void restore(MaidTaskContext context, MaidTaskSnapshot snapshot) {
+        CollectAndDepositExecutor.Phase savedPhase = CollectAndDepositExecutor.Phase.fromName(snapshot.string(
+                PHASE,
+                CollectAndDepositExecutor.Phase.COLLECTING.name()
+        ));
+        if (savedPhase == CollectAndDepositExecutor.Phase.COLLECTING) {
+            toolLease = EquipmentLease.restore(
+                    partner,
+                    CollectAndDepositMaidTask::isAxe,
+                    snapshot.integer(TOOL_LEASE_SOURCE_SLOT, EquipmentLease.NO_SOURCE_SLOT)
+            ).orElse(null);
+        }
         executor.restore(
                 context.contract(),
-                CollectAndDepositExecutor.Phase.fromName(snapshot.string(
-                        PHASE,
-                        CollectAndDepositExecutor.Phase.COLLECTING.name()
-                )),
+                savedPhase,
                 snapshot.integer(COLLECT_INITIAL_TARGET_COUNT, 0),
                 snapshot.integer(DEPOSIT_MOVED_COUNT, 0),
                 new ExecutorResultAdapter(context.resultSink())
@@ -57,7 +72,12 @@ public final class CollectAndDepositMaidTask implements MaidTask {
 
     @Override
     public void tick(MaidTaskContext context) {
+        CollectAndDepositExecutor.Phase before = executor.phase();
         executor.tick(context.serverLevel());
+        if (before == CollectAndDepositExecutor.Phase.COLLECTING
+                && executor.phase() != CollectAndDepositExecutor.Phase.COLLECTING) {
+            releaseToolLease();
+        }
     }
 
     @Override
@@ -68,6 +88,7 @@ public final class CollectAndDepositMaidTask implements MaidTask {
     @Override
     public void stop() {
         executor.stop();
+        releaseToolLease();
     }
 
     @Override
@@ -105,6 +126,10 @@ public final class CollectAndDepositMaidTask implements MaidTask {
                 .putString(PHASE, executor.phase().name())
                 .putInt(COLLECT_INITIAL_TARGET_COUNT, executor.collectInitialTargetCount())
                 .putInt(DEPOSIT_MOVED_COUNT, executor.depositMovedCount())
+                .putInt(
+                        TOOL_LEASE_SOURCE_SLOT,
+                        toolLease == null ? EquipmentLease.NO_SOURCE_SLOT : toolLease.sourceSlot()
+                )
                 .build();
     }
 
@@ -117,6 +142,7 @@ public final class CollectAndDepositMaidTask implements MaidTask {
                 ))
                 .putInt(COLLECT_INITIAL_TARGET_COUNT, input.getIntOr("CollectInitialTargetCount", 0))
                 .putInt(DEPOSIT_MOVED_COUNT, input.getIntOr("DepositMovedCount", 0))
+                .putInt(TOOL_LEASE_SOURCE_SLOT, EquipmentLease.NO_SOURCE_SLOT)
                 .build();
     }
 
@@ -137,5 +163,16 @@ public final class CollectAndDepositMaidTask implements MaidTask {
     public boolean acceptsPickup(Item item) {
         return executor.phase() == CollectAndDepositExecutor.Phase.COLLECTING
                 && collectExecutor.accepts(item);
+    }
+
+    private void releaseToolLease() {
+        if (toolLease != null) {
+            toolLease.close();
+            toolLease = null;
+        }
+    }
+
+    private static boolean isAxe(net.minecraft.world.item.ItemStack stack) {
+        return !stack.isEmpty() && stack.typeHolder().is(ItemTags.AXES);
     }
 }

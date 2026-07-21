@@ -26,7 +26,7 @@ import org.slf4j.LoggerFactory;
  * 服务端唯一活动契约的运行时，统一处理指令、任务、暂停、恢复、终态和持久化。
  */
 public final class MaidTaskRuntime {
-    public static final int CURRENT_DATA_VERSION = 1;
+    public static final int CURRENT_DATA_VERSION = 2;
     private static final Logger LOGGER = LoggerFactory.getLogger(MaidTaskRuntime.class);
 
     private final AiPartnerEntity partner;
@@ -90,6 +90,7 @@ public final class MaidTaskRuntime {
             }
         }
         publish("contract_running", actor, rawInstruction);
+        partner.showSpeechBubble(feedbackFor(contract.job().type()));
     }
 
     private void executeCancelContract(
@@ -108,14 +109,27 @@ public final class MaidTaskRuntime {
         publish("contract_running", actor, rawInstruction);
         cancelContract.markCompleted();
         publish("contract_completed", actor, rawInstruction);
+        partner.showSpeechBubble(feedbackFor(JobType.CANCEL));
     }
 
     private void activateDirective(ManualDirective directive) {
         stopActiveTask();
         behaviorController.activateDirective(directive);
+        partner.onManualDirectiveActivated(directive);
         if (directive == ManualDirective.STAY) {
             partner.getNavigation().stop();
         }
+    }
+
+    /**
+     * 激活不属于旧 Job DSL 的长期指令，例如立即返回当前活动地点。
+     */
+    public void activateManualDirective(ManualDirective directive, @Nullable ServerPlayer actor, String reason) {
+        cancelExisting(actor, reason);
+        currentContract = null;
+        stopActiveTask();
+        behaviorController.activateDirective(directive);
+        partner.onManualDirectiveActivated(directive);
     }
 
     private void startRegisteredTask(TaskContract contract) {
@@ -195,6 +209,7 @@ public final class MaidTaskRuntime {
         partner.getNavigation().stop();
         publish("contract_failed", null, "runtime_monitor");
         notifyOwner(Component.translatable("message.ai-partner.failed", failureCode.name()));
+        partner.showSpeechBubble(Component.translatable("bubble.ai-partner.task_failed"));
     }
 
     /**
@@ -216,6 +231,7 @@ public final class MaidTaskRuntime {
                 completedContract.job().quantity(),
                 completedContract.job().target()
         ));
+        partner.showSpeechBubble(Component.translatable("bubble.ai-partner.task_completed"));
     }
 
     /**
@@ -263,9 +279,12 @@ public final class MaidTaskRuntime {
         return currentContract != null && currentContract.status() == ContractStatus.RUNNING;
     }
 
+    public boolean hasFiniteTaskRunning() {
+        return activeTask != null && hasRunningContract();
+    }
+
     public boolean canUseAmbientMovement() {
         return !behaviorController.isInventoryMenuOpen()
-                && behaviorController.effectiveMode() == io.github.ozozorz.aipartner.entity.PartnerMode.IDLE
                 && !hasRunningContract();
     }
 
@@ -386,6 +405,7 @@ public final class MaidTaskRuntime {
         Optional<ManualDirective> directive = ManualDirective.fromJobType(currentContract.job().type());
         if (directive.isPresent()) {
             behaviorController.activateDirective(directive.get());
+            partner.onManualDirectiveActivated(directive.get());
             if (directive.get() == ManualDirective.STAY) {
                 partner.getNavigation().stop();
             }
@@ -524,5 +544,16 @@ public final class MaidTaskRuntime {
         if (partner.getOwner() instanceof ServerPlayer serverPlayer) {
             serverPlayer.sendSystemMessage(message);
         }
+    }
+
+    private static Component feedbackFor(JobType jobType) {
+        return switch (jobType) {
+            case FOLLOW -> Component.translatable("bubble.ai-partner.follow");
+            case STAY -> Component.translatable("bubble.ai-partner.stay");
+            case CANCEL -> Component.translatable("bubble.ai-partner.cancel");
+            case COLLECT_BLOCK -> Component.translatable("bubble.ai-partner.collect");
+            case DEPOSIT_ITEM -> Component.translatable("bubble.ai-partner.deposit");
+            case COLLECT_AND_DEPOSIT -> Component.translatable("bubble.ai-partner.collect_and_deposit");
+        };
     }
 }

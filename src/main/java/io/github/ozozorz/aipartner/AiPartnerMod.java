@@ -8,6 +8,7 @@ import io.github.ozozorz.aipartner.experiment.ExperimentEventBridge;
 import io.github.ozozorz.aipartner.logging.ExperimentLogger;
 import io.github.ozozorz.aipartner.registry.ModEntities;
 import io.github.ozozorz.aipartner.registry.ModMenus;
+import io.github.ozozorz.aipartner.skin.MaidSkinNetworking;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.resources.Identifier;
@@ -25,6 +26,7 @@ public final class AiPartnerMod implements ModInitializer {
     public void onInitialize() {
         ModEntities.register();
         ModMenus.register();
+        MaidSkinNetworking.registerServer();
         ExperimentEventBridge.register();
         MaidCommand.register();
         ExperimentBatchRunner.register();

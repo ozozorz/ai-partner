@@ -10,7 +10,11 @@ public enum PartnerMode {
     FOLLOWING,
     STAYING,
     COLLECTING,
-    DEPOSITING;
+    DEPOSITING,
+    RETURNING_HOME,
+    WORKING,
+    RELAXING,
+    SLEEPING;
 
     /**
      * 从持久化文本中安全恢复模式。

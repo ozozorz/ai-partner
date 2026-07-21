@@ -1,0 +1,16 @@
+{
+  "maxMaidsPerOwner": 1,
+  "defaultActivityRadius": 8,
+  "maximumActivityRadius": 32,
+  "duskStart": 12000,
+  "nightStart": 14000,
+  "dawnStart": 22000,
+  "sleepHealIntervalTicks": 100,
+  "sleepHealAmount": 1.0,
+  "foodAffectionCooldownTicks": 1200,
+  "foodAffectionGain": 1,
+  "generalPickupEnabled": true,
+  "experiencePickupEnabled": true,
+  "builtInVoiceEnabled": true,
+  "chatBubblesEnabled": true
+}

@@ -15,6 +15,7 @@ public final class MaidBehaviorController {
     private final AiPartnerEntity partner;
     private ManualDirective manualDirective = ManualDirective.NONE;
     private PartnerMode taskMode = PartnerMode.IDLE;
+    private PartnerMode backgroundMode = PartnerMode.IDLE;
     private boolean inventoryMenuOpen;
 
     public MaidBehaviorController(AiPartnerEntity partner) {
@@ -48,12 +49,23 @@ public final class MaidBehaviorController {
         synchronizeMode();
     }
 
+    /**
+     * 更新日程或普通空闲行为的显示投影，不覆盖手动指令和有限任务。
+     */
+    public void setBackgroundMode(PartnerMode mode) {
+        backgroundMode = Objects.requireNonNull(mode, "mode");
+        synchronizeMode();
+    }
+
     public ManualDirective manualDirective() {
         return manualDirective;
     }
 
     public PartnerMode effectiveMode() {
-        return manualDirective == ManualDirective.NONE ? taskMode : manualDirective.displayedMode();
+        if (manualDirective != ManualDirective.NONE) {
+            return manualDirective.displayedMode();
+        }
+        return taskMode == PartnerMode.IDLE ? backgroundMode : taskMode;
     }
 
     public boolean isFollowing() {
@@ -91,6 +103,7 @@ public final class MaidBehaviorController {
                 .map(ManualDirective::fromName)
                 .orElseGet(() -> ManualDirective.fromLegacyMode(legacyMode));
         taskMode = manualDirective == ManualDirective.NONE ? legacyMode : PartnerMode.IDLE;
+        backgroundMode = PartnerMode.IDLE;
         inventoryMenuOpen = false;
         synchronizeMode();
     }

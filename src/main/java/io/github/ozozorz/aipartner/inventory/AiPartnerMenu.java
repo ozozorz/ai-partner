@@ -9,6 +9,10 @@ import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.entity.PartnerMenuAction;
 import io.github.ozozorz.aipartner.entity.PartnerMode;
 import io.github.ozozorz.aipartner.job.JobType;
+import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
+import io.github.ozozorz.aipartner.core.schedule.ScheduleActivity;
+import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
+import io.github.ozozorz.aipartner.life.ActivityLocationType;
 import io.github.ozozorz.aipartner.registry.ModMenus;
 import java.util.Optional;
 import net.minecraft.core.component.DataComponents;
@@ -32,7 +36,7 @@ import net.minecraft.world.item.equipment.Equippable;
 import org.jspecify.annotations.Nullable;
 
 /**
- * AI 女仆的服务端权威背包菜单，包含 36 格储物区、四格护甲、副手和玩家背包。
+ * AI 女仆的服务端权威背包菜单，包含原生主手、35 格储物、四格护甲和副手。
  */
 public final class AiPartnerMenu extends AbstractContainerMenu {
     public static final int STORAGE_SLOT_COUNT = 36;
@@ -48,7 +52,7 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
     public static final int EQUIPMENT_TOP = 148;
     public static final int PLAYER_LEFT = 114;
     public static final int PLAYER_TOP = 140;
-    public static final int SCREEN_WIDTH = 284;
+    public static final int SCREEN_WIDTH = 382;
     public static final int SCREEN_HEIGHT = 230;
 
     private static final int DATA_MODE = 0;
@@ -56,7 +60,17 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
     private static final int DATA_CONTRACT_STATUS = 2;
     private static final int DATA_HEALTH = 3;
     private static final int DATA_MAX_HEALTH = 4;
-    private static final int DATA_COUNT = 5;
+    private static final int DATA_SCHEDULE_TYPE = 5;
+    private static final int DATA_SCHEDULE_ACTIVITY = 6;
+    private static final int DATA_HOME_BOUND = 7;
+    private static final int DATA_ACTIVITY_RADIUS = 8;
+    private static final int DATA_NEXT_SCHEDULE_CHANGE = 9;
+    private static final int DATA_LOCATION_MASK = 10;
+    private static final int DATA_AFFECTION = 11;
+    private static final int DATA_GROWTH_LEVEL = 12;
+    private static final int DATA_GROWTH_EXPERIENCE = 13;
+    private static final int DATA_MAX_ACTIVITY_RADIUS = 14;
+    private static final int DATA_COUNT = 15;
 
     private final @Nullable AiPartnerEntity partner;
     private final ContainerData stateData;
@@ -85,20 +99,26 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
         super(ModMenus.AI_PARTNER, containerId);
         this.partner = partner;
         this.stateData = stateData;
-        Container storage = partner == null ? new SimpleContainer(STORAGE_SLOT_COUNT) : partner.getInventory();
+        Container mainHand = partner == null
+                ? new SimpleContainer(1)
+                : new AiPartnerMainHandContainer(partner);
+        Container storage = partner == null
+                ? new SimpleContainer(MaidInventoryPersistence.STORAGE_SLOT_COUNT)
+                : partner.getInventory();
         Container equipment = partner == null
                 ? new SimpleContainer(EQUIPMENT_SLOT_COUNT)
                 : new AiPartnerEquipmentContainer(partner);
 
-        for (int row = 0; row < 4; row++) {
-            for (int column = 0; column < 9; column++) {
-                addSlot(new Slot(
-                        storage,
-                        column + row * 9,
-                        STORAGE_LEFT + column * 18,
-                        STORAGE_TOP + row * 18
-                ));
-            }
+        addSlot(new Slot(mainHand, 0, STORAGE_LEFT, STORAGE_TOP));
+        for (int displayIndex = 1; displayIndex < STORAGE_SLOT_COUNT; displayIndex++) {
+            int row = displayIndex / 9;
+            int column = displayIndex % 9;
+            addSlot(new Slot(
+                    storage,
+                    displayIndex - 1,
+                    STORAGE_LEFT + column * 18,
+                    STORAGE_TOP + row * 18
+            ));
         }
 
         for (int slotIndex = 0; slotIndex < 4; slotIndex++) {
@@ -156,7 +176,7 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
             }
         } else {
             boolean movedToEquipment = tryQuickEquip(source);
-            if (!movedToEquipment && !moveItemStackTo(source, 0, STORAGE_SLOT_COUNT, false)) {
+            if (!movedToEquipment && !moveItemStackTo(source, 1, STORAGE_SLOT_COUNT, false)) {
                 boolean movedWithinPlayer = slotIndex < PLAYER_MAIN_SLOT_END
                         ? moveItemStackTo(source, PLAYER_MAIN_SLOT_END, PLAYER_SLOT_END, false)
                         : moveItemStackTo(source, PLAYER_SLOT_START, PLAYER_MAIN_SLOT_END, false);
@@ -188,7 +208,17 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
             return false;
         }
 
-        JobSpec candidate = JobSpec.basic(action.get().jobType());
+        if (!action.get().isContractAction()) {
+            boolean handled = handleLifeAction(action.get(), serverPlayer);
+            if (handled) {
+                serverPlayer.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+                        action.get().responseKey()
+                ));
+            }
+            return handled;
+        }
+
+        JobSpec candidate = JobSpec.basic(java.util.Objects.requireNonNull(action.get().jobType()));
         String rawInstruction = "ui_button:" + action.get().name().toLowerCase();
         ContractDecision decision = MaidOrderService.submit(
                 partner,
@@ -203,6 +233,32 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
         }
 
         serverPlayer.sendSystemMessage(net.minecraft.network.chat.Component.translatable(action.get().responseKey()));
+        return true;
+    }
+
+    /**
+     * 执行不经过有限任务 DSL 的生活与日程按钮。
+     */
+    private boolean handleLifeAction(PartnerMenuAction action, ServerPlayer player) {
+        switch (action) {
+            case RETURN_HOME -> partner.requestReturnHome(player);
+            case CYCLE_SCHEDULE -> partner.setScheduleType(partner.getScheduleType().next());
+            case TOGGLE_HOME_BOUND -> partner.setHomeBound(!partner.isHomeBound());
+            case SET_WORK_LOCATION -> partner.setActivityLocation(ActivityLocationType.WORK);
+            case CLEAR_WORK_LOCATION -> partner.clearActivityLocation(ActivityLocationType.WORK);
+            case SET_LEISURE_LOCATION -> partner.setActivityLocation(ActivityLocationType.LEISURE);
+            case CLEAR_LEISURE_LOCATION -> partner.clearActivityLocation(ActivityLocationType.LEISURE);
+            case SET_SLEEP_LOCATION -> partner.setActivityLocation(ActivityLocationType.SLEEP);
+            case CLEAR_SLEEP_LOCATION -> partner.clearActivityLocation(ActivityLocationType.SLEEP);
+            case DECREASE_RADIUS -> partner.setActivityRadius(Math.max(1, partner.getActivityRadius() - 1));
+            case INCREASE_RADIUS -> partner.setActivityRadius(Math.min(
+                    MaidGameplayConfig.get().maximumActivityRadius(),
+                    partner.getActivityRadius() + 1
+            ));
+            case FOLLOW, STAY, CANCEL -> {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -238,6 +294,50 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
         return stateData.get(DATA_MAX_HEALTH) / 10.0F;
     }
 
+    public ScheduleType displayedScheduleType() {
+        return enumByOrdinal(ScheduleType.values(), stateData.get(DATA_SCHEDULE_TYPE), ScheduleType.DAY_SHIFT);
+    }
+
+    public ScheduleActivity displayedScheduleActivity() {
+        return enumByOrdinal(
+                ScheduleActivity.values(),
+                stateData.get(DATA_SCHEDULE_ACTIVITY),
+                ScheduleActivity.LEISURE
+        );
+    }
+
+    public boolean displayedHomeBound() {
+        return stateData.get(DATA_HOME_BOUND) != 0;
+    }
+
+    public int displayedActivityRadius() {
+        return stateData.get(DATA_ACTIVITY_RADIUS);
+    }
+
+    public int displayedMaximumActivityRadius() {
+        return Math.max(1, stateData.get(DATA_MAX_ACTIVITY_RADIUS));
+    }
+
+    public int displayedTicksUntilScheduleChange() {
+        return stateData.get(DATA_NEXT_SCHEDULE_CHANGE);
+    }
+
+    public int displayedLocationMask() {
+        return stateData.get(DATA_LOCATION_MASK);
+    }
+
+    public int displayedAffection() {
+        return stateData.get(DATA_AFFECTION);
+    }
+
+    public int displayedGrowthLevel() {
+        return stateData.get(DATA_GROWTH_LEVEL);
+    }
+
+    public int displayedGrowthExperience() {
+        return stateData.get(DATA_GROWTH_EXPERIENCE);
+    }
+
     private boolean tryQuickEquip(ItemStack itemStack) {
         if (partner == null || itemStack.isEmpty()) {
             return false;
@@ -267,6 +367,16 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
                     case DATA_CONTRACT_STATUS -> partner.getCurrentContract().map(contract -> contract.status().ordinal()).orElse(-1);
                     case DATA_HEALTH -> Math.round(partner.getHealth() * 10.0F);
                     case DATA_MAX_HEALTH -> Math.round(partner.getMaxHealth() * 10.0F);
+                    case DATA_SCHEDULE_TYPE -> partner.getScheduleType().ordinal();
+                    case DATA_SCHEDULE_ACTIVITY -> partner.getScheduleActivity().ordinal();
+                    case DATA_HOME_BOUND -> partner.isHomeBound() ? 1 : 0;
+                    case DATA_ACTIVITY_RADIUS -> partner.getActivityRadius();
+                    case DATA_NEXT_SCHEDULE_CHANGE -> partner.getTicksUntilScheduleTransition();
+                    case DATA_LOCATION_MASK -> partner.getConfiguredLocationMask();
+                    case DATA_AFFECTION -> partner.getAffection();
+                    case DATA_GROWTH_LEVEL -> partner.getGrowthLevel();
+                    case DATA_GROWTH_EXPERIENCE -> partner.getGrowthExperience();
+                    case DATA_MAX_ACTIVITY_RADIUS -> MaidGameplayConfig.get().maximumActivityRadius();
                     default -> 0;
                 };
             }

@@ -2,6 +2,7 @@ package io.github.ozozorz.aipartner.command;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
@@ -10,7 +11,9 @@ import io.github.ozozorz.aipartner.AiPartnerMod;
 import io.github.ozozorz.aipartner.contract.ContractDecision;
 import io.github.ozozorz.aipartner.contract.JobSpec;
 import io.github.ozozorz.aipartner.core.order.MaidOrderService;
+import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
 import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
+import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.evaluation.OfflineEvaluationService;
 import io.github.ozozorz.aipartner.evaluation.OfflineLlmEvaluationService;
@@ -30,6 +33,7 @@ import io.github.ozozorz.aipartner.llm.DialogueAct;
 import io.github.ozozorz.aipartner.llm.LlmCallResult;
 import io.github.ozozorz.aipartner.llm.LlmGateway;
 import io.github.ozozorz.aipartner.logging.ExperimentLogger;
+import io.github.ozozorz.aipartner.life.ActivityLocationType;
 import io.github.ozozorz.aipartner.parser.RuleJobParser;
 import io.github.ozozorz.aipartner.service.PartnerService;
 import io.github.ozozorz.aipartner.world.WorldStateSummary;
@@ -64,6 +68,41 @@ public final class MaidCommand {
                         .then(Commands.literal("status").executes(MaidCommand::status))
                         .then(Commands.literal("inventory").executes(MaidCommand::inventory))
                         .then(Commands.literal("retrieve").executes(MaidCommand::retrieveInventory))
+                        .then(Commands.literal("list").executes(MaidCommand::listMaids))
+                        .then(Commands.literal("select")
+                                .then(Commands.argument("maid", StringArgumentType.string())
+                                        .executes(MaidCommand::selectMaid)))
+                        .then(Commands.literal("home").executes(MaidCommand::returnHome))
+                        .then(Commands.literal("name")
+                                .then(Commands.argument("name", StringArgumentType.greedyString())
+                                        .executes(MaidCommand::renameMaid)))
+                        .then(Commands.literal("schedule")
+                                .then(Commands.literal("day")
+                                        .executes(context -> setSchedule(context, ScheduleType.DAY_SHIFT)))
+                                .then(Commands.literal("night")
+                                        .executes(context -> setSchedule(context, ScheduleType.NIGHT_SHIFT)))
+                                .then(Commands.literal("all-day")
+                                        .executes(context -> setSchedule(context, ScheduleType.ALL_DAY))))
+                        .then(Commands.literal("location")
+                                .then(Commands.literal("set")
+                                        .then(locationTypeBranch("work", ActivityLocationType.WORK, true))
+                                        .then(locationTypeBranch("leisure", ActivityLocationType.LEISURE, true))
+                                        .then(locationTypeBranch("sleep", ActivityLocationType.SLEEP, true)))
+                                .then(Commands.literal("clear")
+                                        .then(locationTypeBranch("work", ActivityLocationType.WORK, false))
+                                        .then(locationTypeBranch("leisure", ActivityLocationType.LEISURE, false))
+                                        .then(locationTypeBranch("sleep", ActivityLocationType.SLEEP, false))))
+                        .then(Commands.literal("home-bound")
+                                .then(Commands.argument("enabled", BoolArgumentType.bool())
+                                        .executes(MaidCommand::setHomeBound)))
+                        .then(Commands.literal("radius")
+                                .then(Commands.argument(
+                                        "radius",
+                                        IntegerArgumentType.integer(
+                                                1,
+                                                MaidGameplayConfig.get().maximumActivityRadius()
+                                        )
+                                ).executes(MaidCommand::setActivityRadius)))
                         .then(createExperimentCommand())
                         .then(Commands.literal("follow").executes(context -> runBasicJob(context, JobType.FOLLOW)))
                         .then(Commands.literal("stay").executes(context -> runBasicJob(context, JobType.STAY)))
@@ -127,6 +166,14 @@ public final class MaidCommand {
                                         )))
                         .then(Commands.argument("message", StringArgumentType.greedyString()).executes(MaidCommand::handleMessage))
         ));
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> locationTypeBranch(
+            String literal,
+            ActivityLocationType type,
+            boolean set
+    ) {
+        return Commands.literal(literal).executes(context -> configureLocation(context, type, set));
     }
 
     /**
@@ -240,8 +287,13 @@ public final class MaidCommand {
 
     private static int spawn(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         ServerPlayer player = context.getSource().getPlayerOrException();
-        if (PartnerService.findOwnedPartner(player).isPresent()) {
-            context.getSource().sendFailure(Component.translatable("message.ai-partner.already_exists"));
+        int currentCount = PartnerService.indexedOwnedCount(player);
+        int maximum = MaidGameplayConfig.get().maxMaidsPerOwner();
+        if (currentCount >= maximum) {
+            context.getSource().sendFailure(Component.translatable(
+                    "message.ai-partner.owner_limit",
+                    maximum
+            ));
             return 0;
         }
         if (PartnerService.spawnPartner(player).isEmpty()) {
@@ -250,6 +302,150 @@ public final class MaidCommand {
         }
         context.getSource().sendSuccess(() -> Component.translatable("message.ai-partner.spawned"), false);
         return 1;
+    }
+
+    private static int listMaids(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity selected = PartnerService.findOwnedPartner(player).orElse(null);
+        java.util.List<AiPartnerEntity> maids = PartnerService.findOwnedPartners(player);
+        if (maids.isEmpty()) {
+            context.getSource().sendFailure(Component.translatable("message.ai-partner.not_found"));
+            return 0;
+        }
+        for (AiPartnerEntity maid : maids) {
+            boolean active = selected != null && selected.getUUID().equals(maid.getUUID());
+            context.getSource().sendSuccess(() -> Component.translatable(
+                    "message.ai-partner.list_entry",
+                    active ? "*" : " ",
+                    maid.getName(),
+                    maid.getStringUUID(),
+                    maid.level().dimension().identifier().toString()
+            ), false);
+        }
+        return maids.size();
+    }
+
+    private static int selectMaid(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        String selector = StringArgumentType.getString(context, "maid");
+        AiPartnerEntity selected = PartnerService.selectOwnedPartner(player, selector).orElse(null);
+        if (selected == null) {
+            context.getSource().sendFailure(Component.translatable("message.ai-partner.select_failed", selector));
+            return 0;
+        }
+        context.getSource().sendSuccess(
+                () -> Component.translatable("message.ai-partner.selected", selected.getName()),
+                false
+        );
+        return 1;
+    }
+
+    private static int returnHome(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity partner = requirePartner(context, player);
+        if (partner == null) {
+            return 0;
+        }
+        partner.requestReturnHome(player);
+        context.getSource().sendSuccess(() -> Component.translatable("message.ai-partner.returning_home"), false);
+        return 1;
+    }
+
+    private static int renameMaid(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity partner = requirePartner(context, player);
+        if (partner == null) {
+            return 0;
+        }
+        String name = StringArgumentType.getString(context, "name").strip();
+        if (name.isEmpty() || name.length() > 32 || name.chars().anyMatch(Character::isISOControl)) {
+            context.getSource().sendFailure(Component.translatable("message.ai-partner.invalid_name"));
+            return 0;
+        }
+        partner.setCustomName(Component.literal(name));
+        partner.setCustomNameVisible(true);
+        context.getSource().sendSuccess(() -> Component.translatable("message.ai-partner.renamed", name), false);
+        return 1;
+    }
+
+    private static int setSchedule(
+            CommandContext<CommandSourceStack> context,
+            ScheduleType scheduleType
+    ) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity partner = requirePartner(context, player);
+        if (partner == null) {
+            return 0;
+        }
+        partner.setScheduleType(scheduleType);
+        context.getSource().sendSuccess(() -> Component.translatable(
+                "message.ai-partner.schedule_set",
+                scheduleType.name()
+        ), false);
+        return 1;
+    }
+
+    private static int configureLocation(
+            CommandContext<CommandSourceStack> context,
+            ActivityLocationType type,
+            boolean set
+    ) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity partner = requirePartner(context, player);
+        if (partner == null) {
+            return 0;
+        }
+        if (set) {
+            partner.setActivityLocation(type);
+        } else {
+            partner.clearActivityLocation(type);
+        }
+        context.getSource().sendSuccess(() -> Component.translatable(
+                set ? "message.ai-partner.location_set" : "message.ai-partner.location_cleared",
+                type.name()
+        ), false);
+        return 1;
+    }
+
+    private static int setHomeBound(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity partner = requirePartner(context, player);
+        if (partner == null) {
+            return 0;
+        }
+        boolean enabled = BoolArgumentType.getBool(context, "enabled");
+        partner.setHomeBound(enabled);
+        context.getSource().sendSuccess(() -> Component.translatable(
+                "message.ai-partner.home_bound_set",
+                enabled
+        ), false);
+        return 1;
+    }
+
+    private static int setActivityRadius(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity partner = requirePartner(context, player);
+        if (partner == null) {
+            return 0;
+        }
+        int radius = IntegerArgumentType.getInteger(context, "radius");
+        partner.setActivityRadius(radius);
+        context.getSource().sendSuccess(() -> Component.translatable(
+                "message.ai-partner.radius_set",
+                radius
+        ), false);
+        return 1;
+    }
+
+    private static AiPartnerEntity requirePartner(
+            CommandContext<CommandSourceStack> context,
+            ServerPlayer player
+    ) {
+        AiPartnerEntity partner = PartnerService.findOwnedPartner(player).orElse(null);
+        if (partner == null) {
+            context.getSource().sendFailure(Component.translatable("message.ai-partner.not_found"));
+        }
+        return partner;
     }
 
     private static int status(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {

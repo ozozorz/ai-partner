@@ -3,14 +3,29 @@ package io.github.ozozorz.aipartner.entity;
 import io.github.ozozorz.aipartner.contract.FailureCode;
 import io.github.ozozorz.aipartner.contract.TaskContract;
 import io.github.ozozorz.aipartner.core.behavior.MaidBehaviorController;
+import io.github.ozozorz.aipartner.core.behavior.ManualDirective;
 import io.github.ozozorz.aipartner.core.task.MaidTaskRuntime;
 import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
+import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
 import io.github.ozozorz.aipartner.entity.goal.AiPartnerFollowOwnerGoal;
 import io.github.ozozorz.aipartner.entity.goal.AiPartnerIdleWanderGoal;
+import io.github.ozozorz.aipartner.entity.goal.AiPartnerReturnToActivityGoal;
 import io.github.ozozorz.aipartner.entity.navigation.AiPartnerPathNavigation;
+import io.github.ozozorz.aipartner.growth.MaidGrowthData;
+import io.github.ozozorz.aipartner.inventory.MaidInventoryPersistence;
 import io.github.ozozorz.aipartner.inventory.AiPartnerMenu;
+import io.github.ozozorz.aipartner.life.ActivityLocation;
+import io.github.ozozorz.aipartner.life.ActivityLocationType;
+import io.github.ozozorz.aipartner.life.MaidFeedingService;
+import io.github.ozozorz.aipartner.life.MaidLifeController;
+import io.github.ozozorz.aipartner.life.MaidPickupController;
 import io.github.ozozorz.aipartner.registry.ModTasks;
+import io.github.ozozorz.aipartner.service.PartnerService;
+import io.github.ozozorz.aipartner.core.schedule.ScheduleActivity;
+import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
@@ -22,6 +37,7 @@ import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -64,14 +80,43 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             AiPartnerEntity.class,
             EntityDataSerializers.INT
     );
+    private static final EntityDataAccessor<Optional<Component>> DATA_SPEECH_BUBBLE = SynchedEntityData.defineId(
+            AiPartnerEntity.class,
+            EntityDataSerializers.OPTIONAL_COMPONENT
+    );
+    private static final EntityDataAccessor<Long> DATA_SPEECH_BUBBLE_UNTIL = SynchedEntityData.defineId(
+            AiPartnerEntity.class,
+            EntityDataSerializers.LONG
+    );
+    private static final EntityDataAccessor<String> DATA_SKIN_HASH = SynchedEntityData.defineId(
+            AiPartnerEntity.class,
+            EntityDataSerializers.STRING
+    );
 
-    private final SimpleContainer inventory = new SimpleContainer(AiPartnerMenu.STORAGE_SLOT_COUNT);
+    private final SimpleContainer inventory = new SimpleContainer(MaidInventoryPersistence.STORAGE_SLOT_COUNT);
+    private final MaidGrowthData growthData = new MaidGrowthData();
     private final MaidBehaviorController behaviorController = new MaidBehaviorController(this);
     private final MaidTaskRuntime taskRuntime = new MaidTaskRuntime(
             this,
             behaviorController,
             ModTasks.createRegistry()
     );
+    private final MaidGameplayConfig gameplayConfig = MaidGameplayConfig.get();
+    private final MaidLifeController lifeController = new MaidLifeController(
+            this,
+            behaviorController,
+            taskRuntime,
+            gameplayConfig
+    );
+    private final MaidPickupController pickupController = new MaidPickupController(
+            this,
+            lifeController,
+            growthData,
+            gameplayConfig
+    );
+    private final List<ItemStack> pendingMigrationDrops = new ArrayList<>();
+    private long lastFoodAffectionGameTime = Long.MIN_VALUE;
+    private boolean ownershipRegistered;
 
     public AiPartnerEntity(EntityType<? extends AiPartnerEntity> entityType, Level level) {
         super(entityType, level);
@@ -93,6 +138,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         goalSelector.addGoal(0, new FloatGoal(this));
         goalSelector.addGoal(1, new AiPartnerFollowOwnerGoal(this, 1.05, 5.0F, 3.0F));
         goalSelector.addGoal(2, new OpenDoorGoal(this, true));
+        goalSelector.addGoal(3, new AiPartnerReturnToActivityGoal(this, 0.9));
         goalSelector.addGoal(6, new AiPartnerIdleWanderGoal(this, 0.65));
         goalSelector.addGoal(7, new LookAtPlayerGoal(this, Player.class, 8.0F, 0.035F));
         goalSelector.addGoal(8, new RandomLookAroundGoal(this));
@@ -110,6 +156,9 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
         builder.define(DATA_MODE, PartnerMode.IDLE.ordinal());
+        builder.define(DATA_SPEECH_BUBBLE, Optional.empty());
+        builder.define(DATA_SPEECH_BUBBLE_UNTIL, 0L);
+        builder.define(DATA_SKIN_HASH, "");
     }
 
     /**
@@ -194,11 +243,78 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     }
 
     public boolean canUseAmbientMovement() {
-        return taskRuntime.canUseAmbientMovement();
+        return taskRuntime.canUseAmbientMovement() && lifeController.canUseAmbientMovement();
     }
 
     public boolean isInventoryMenuOpen() {
         return behaviorController.isInventoryMenuOpen();
+    }
+
+    public Optional<net.minecraft.core.BlockPos> getActivityNavigationTarget() {
+        return lifeController.movementTarget();
+    }
+
+    /**
+     * 任务运行时切换长期指令时通知生活层建立或解除位置锚点。
+     */
+    public void onManualDirectiveActivated(ManualDirective directive) {
+        lifeController.onManualDirectiveActivated(directive);
+    }
+
+    public void requestReturnHome(ServerPlayer actor) {
+        taskRuntime.activateManualDirective(ManualDirective.RETURN_HOME, actor, "return_home");
+    }
+
+    public void initializeLifeAtSpawn() {
+        lifeController.initializeDefaultHome();
+    }
+
+    public ScheduleType getScheduleType() {
+        return lifeController.scheduleType();
+    }
+
+    public void setScheduleType(ScheduleType scheduleType) {
+        lifeController.setScheduleType(scheduleType);
+    }
+
+    public ScheduleActivity getScheduleActivity() {
+        return lifeController.currentActivity();
+    }
+
+    public int getTicksUntilScheduleTransition() {
+        return lifeController.ticksUntilNextScheduleTransition();
+    }
+
+    public boolean isHomeBound() {
+        return lifeController.homeBound();
+    }
+
+    public void setHomeBound(boolean homeBound) {
+        lifeController.setHomeBound(homeBound);
+    }
+
+    public int getActivityRadius() {
+        return lifeController.activityRadius();
+    }
+
+    public void setActivityRadius(int radius) {
+        lifeController.setActivityRadius(radius);
+    }
+
+    public int getConfiguredLocationMask() {
+        return lifeController.configuredLocationMask();
+    }
+
+    public void setActivityLocation(ActivityLocationType type) {
+        lifeController.setLocationAtCurrentPosition(type);
+    }
+
+    public void clearActivityLocation(ActivityLocationType type) {
+        lifeController.clearLocation(type);
+    }
+
+    public Optional<ActivityLocation> getActivityLocation(ActivityLocationType type) {
+        return lifeController.location(type);
     }
 
     /**
@@ -255,7 +371,8 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
      * 检查背包中的斧类工具前置条件。
      */
     public boolean hasAxe() {
-        return inventory.getItems().stream()
+        return getMainHandItem().typeHolder().is(ItemTags.AXES)
+                || inventory.getItems().stream()
                 .anyMatch(stack -> !stack.isEmpty() && stack.typeHolder().is(ItemTags.AXES));
     }
 
@@ -264,6 +381,13 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
      */
     public String inventorySummary() {
         Map<String, Integer> totals = new LinkedHashMap<>();
+        if (!getMainHandItem().isEmpty()) {
+            totals.merge(
+                    BuiltInRegistries.ITEM.getKey(getMainHandItem().getItem()).toString(),
+                    getMainHandItem().getCount(),
+                    Integer::sum
+            );
+        }
         for (ItemStack stack : inventory.getItems()) {
             if (!stack.isEmpty()) {
                 totals.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
@@ -285,6 +409,12 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             return -1;
         }
         int returned = 0;
+        ItemStack mainHand = getMainHandItem();
+        if (!mainHand.isEmpty()) {
+            returned += mainHand.getCount();
+            setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+            player.getInventory().placeItemBackInInventory(mainHand);
+        }
         for (ItemStack stack : inventory.removeAllItems()) {
             returned += stack.getCount();
             player.getInventory().placeItemBackInInventory(stack);
@@ -333,18 +463,34 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     public void tick() {
         super.tick();
         taskRuntime.tick();
+        lifeController.tick();
+        pickupController.tick();
+        if (!level().isClientSide()) {
+            if (!ownershipRegistered && getOwnerReference() != null) {
+                PartnerService.registerLoaded(this);
+                ownershipRegistered = true;
+            }
+            dropPendingMigrationItems();
+        }
     }
 
     @Override
     public InteractionResult mobInteract(Player player, InteractionHand hand) {
         if (!isTame()) {
             if (!level().isClientSide()) {
+                if (!(player instanceof ServerPlayer serverPlayer) || !PartnerService.mayOwnAnother(serverPlayer)) {
+                    player.sendSystemMessage(Component.translatable(
+                            "message.ai-partner.owner_limit",
+                            MaidGameplayConfig.get().maxMaidsPerOwner()
+                    ));
+                    return InteractionResult.FAIL;
+                }
                 tame(player);
                 setPersistenceRequired();
-                setCustomName(Component.translatable("entity.ai-partner.ai_partner"));
-                if (player instanceof ServerPlayer serverPlayer) {
-                    serverPlayer.sendSystemMessage(Component.translatable("message.ai-partner.bound"));
-                }
+                initializeLifeAtSpawn();
+                PartnerService.registerLoaded(this);
+                ownershipRegistered = true;
+                serverPlayer.sendSystemMessage(Component.translatable("message.ai-partner.bound"));
             }
             return level().isClientSide() ? InteractionResult.SUCCESS : InteractionResult.SUCCESS_SERVER;
         }
@@ -353,6 +499,12 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             if (player.isShiftKeyDown()) {
                 if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
                     serverPlayer.openMenu(this);
+                }
+                return level().isClientSide() ? InteractionResult.SUCCESS : InteractionResult.SUCCESS_SERVER;
+            }
+            if (MaidFeedingService.isEdible(heldItem)) {
+                if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    MaidFeedingService.feed(this, serverPlayer, heldItem);
                 }
                 return level().isClientSide() ? InteractionResult.SUCCESS : InteractionResult.SUCCESS_SERVER;
             }
@@ -421,12 +573,15 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
 
     @Override
     public boolean wantsToPickUp(ServerLevel level, ItemStack itemStack) {
-        return taskRuntime.acceptsPickup(itemStack.getItem()) && inventory.canAddItem(itemStack);
+        return (taskRuntime.acceptsPickup(itemStack.getItem()) || pickupController.wantsItem(itemStack))
+                && inventory.canAddItem(itemStack);
     }
 
     @Override
     protected void pickUpItem(ServerLevel level, ItemEntity entity) {
-        InventoryCarrier.pickUpItem(level, this, this, entity);
+        if (taskRuntime.acceptsPickup(entity.getItem().getItem()) || pickupController.wantsItem(entity)) {
+            InventoryCarrier.pickUpItem(level, this, this, entity);
+        }
     }
 
     @Override
@@ -438,14 +593,43 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     }
 
     @Override
+    public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
+        boolean hurt = super.hurtServer(level, source, amount);
+        if (hurt) {
+            lifeController.onHurt();
+        }
+        return hurt;
+    }
+
+    @Override
+    public void onRemoval(RemovalReason reason) {
+        super.onRemoval(reason);
+        if (!level().isClientSide() && reason.shouldDestroy()) {
+            PartnerService.unregisterDestroyed(this);
+        }
+    }
+
+    @Override
     protected void dropEquipment(ServerLevel level) {
+        for (EquipmentSlot slot : new EquipmentSlot[]{
+                EquipmentSlot.MAINHAND,
+                EquipmentSlot.OFFHAND,
+                EquipmentSlot.HEAD,
+                EquipmentSlot.CHEST,
+                EquipmentSlot.LEGS,
+                EquipmentSlot.FEET
+        }) {
+            if (!getItemBySlot(slot).isEmpty()) {
+                setGuaranteedDrop(slot);
+            }
+        }
         super.dropEquipment(level);
         inventory.removeAllItems().forEach(stack -> spawnAtLocation(level, stack));
     }
 
     @Override
     public boolean isFood(ItemStack itemStack) {
-        return false;
+        return MaidFeedingService.isEdible(itemStack);
     }
 
     @Override
@@ -456,14 +640,109 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     @Override
     protected void addAdditionalSaveData(ValueOutput output) {
         super.addAdditionalSaveData(output);
-        writeInventoryToTag(output);
+        MaidInventoryPersistence.save(inventory, output);
         taskRuntime.save(output);
+        lifeController.save(output);
+        growthData.save(output);
+        output.putLong("LastFoodAffectionGameTime", lastFoodAffectionGameTime);
+        if (!getSkinHash().isEmpty()) {
+            output.putString("MaidSkinHash", getSkinHash());
+        }
     }
 
     @Override
     protected void readAdditionalSaveData(ValueInput input) {
         super.readAdditionalSaveData(input);
-        readInventoryFromTag(input);
+        int dataVersion = input.getIntOr("AiPartnerDataVersion", 0);
+        MaidInventoryPersistence.LoadResult inventoryLoad = MaidInventoryPersistence.load(
+                inventory,
+                getMainHandItem(),
+                input,
+                dataVersion
+        );
+        setItemSlot(EquipmentSlot.MAINHAND, inventoryLoad.mainHand());
+        pendingMigrationDrops.clear();
+        pendingMigrationDrops.addAll(inventoryLoad.overflow());
         taskRuntime.load(input);
+        lifeController.load(input);
+        growthData.load(input);
+        lastFoodAffectionGameTime = input.getLongOr("LastFoodAffectionGameTime", Long.MIN_VALUE);
+        setSkinHash(input.getStringOr("MaidSkinHash", ""));
+        ownershipRegistered = false;
+    }
+
+    public int getAffection() {
+        return growthData.affection();
+    }
+
+    public int getGrowthExperience() {
+        return growthData.experience();
+    }
+
+    public int getGrowthLevel() {
+        return growthData.level();
+    }
+
+    /**
+     * 食物好感度受服务端冷却限制，防止堆叠食物瞬间刷满关系值。
+     */
+    public void rewardFoodAffection(int amount, int cooldownTicks) {
+        long gameTime = level().getGameTime();
+        if (amount > 0
+                && (lastFoodAffectionGameTime == Long.MIN_VALUE
+                || gameTime - lastFoodAffectionGameTime >= cooldownTicks)) {
+            growthData.addAffection(amount);
+            lastFoodAffectionGameTime = gameTime;
+        }
+    }
+
+    /**
+     * 成长数据目前通过菜单 ContainerData 同步，此钩子保留统一变更入口。
+     */
+    public void syncGrowthData() {
+        // ContainerData 每 tick 从实体读取，无需另发自定义数据包。
+    }
+
+    /**
+     * 显示短时聊天气泡，并可使用原版内置 Allay 声音作为无需资源包的基础语音反馈。
+     */
+    public void showSpeechBubble(Component message) {
+        if (gameplayConfig.chatBubblesEnabled()) {
+            entityData.set(DATA_SPEECH_BUBBLE, Optional.of(message));
+            entityData.set(DATA_SPEECH_BUBBLE_UNTIL, level().getGameTime() + 80L);
+        }
+        if (!level().isClientSide() && gameplayConfig.builtInVoiceEnabled()) {
+            playSound(SoundEvents.ALLAY_AMBIENT_WITH_ITEM, 0.65F, 1.15F);
+        }
+    }
+
+    public Optional<Component> getActiveSpeechBubble() {
+        if (level().getGameTime() >= entityData.get(DATA_SPEECH_BUBBLE_UNTIL)) {
+            return Optional.empty();
+        }
+        return entityData.get(DATA_SPEECH_BUBBLE);
+    }
+
+    public String getSkinHash() {
+        return entityData.get(DATA_SKIN_HASH);
+    }
+
+    /**
+     * 只接受服务端验证器生成的 SHA-256 十六进制标识；空值恢复 Alex 外观。
+     */
+    public void setSkinHash(String hash) {
+        String normalized = hash == null ? "" : hash.toLowerCase(java.util.Locale.ROOT);
+        entityData.set(DATA_SKIN_HASH, normalized.matches("[0-9a-f]{64}") ? normalized : "");
+    }
+
+    private void dropPendingMigrationItems() {
+        if (!(level() instanceof ServerLevel level) || pendingMigrationDrops.isEmpty()) {
+            return;
+        }
+        for (ItemStack stack : List.copyOf(pendingMigrationDrops)) {
+            spawnAtLocation(level, stack);
+        }
+        pendingMigrationDrops.clear();
+        logRuntimeEvent("inventory_migration_overflow_dropped");
     }
 }

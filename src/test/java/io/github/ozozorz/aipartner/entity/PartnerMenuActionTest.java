@@ -15,12 +15,14 @@ class PartnerMenuActionTest {
         assertEquals(JobType.FOLLOW, PartnerMenuAction.fromButtonId(0).orElseThrow().jobType());
         assertEquals(JobType.STAY, PartnerMenuAction.fromButtonId(1).orElseThrow().jobType());
         assertEquals(JobType.CANCEL, PartnerMenuAction.fromButtonId(2).orElseThrow().jobType());
+        assertEquals(PartnerMenuAction.RETURN_HOME, PartnerMenuAction.fromButtonId(3).orElseThrow());
+        assertTrue(!PartnerMenuAction.fromButtonId(3).orElseThrow().isContractAction());
     }
 
     @Test
     void rejectsUnknownButtonIds() {
         assertTrue(PartnerMenuAction.fromButtonId(-1).isEmpty());
-        assertTrue(PartnerMenuAction.fromButtonId(3).isEmpty());
+        assertTrue(PartnerMenuAction.fromButtonId(14).isEmpty());
         assertTrue(PartnerMenuAction.fromButtonId(Integer.MAX_VALUE).isEmpty());
     }
 }

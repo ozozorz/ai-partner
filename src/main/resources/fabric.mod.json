@@ -21,6 +21,9 @@
       "io.github.ozozorz.aipartner.client.AiPartnerClient"
     ]
   },
+  "mixins": [
+    "ai-partner.mixins.json"
+  ],
   "depends": {
     "fabricloader": ">=0.19.3",
     "minecraft": "~26.1.2",
@@ -28,4 +31,3 @@
     "fabric-api": "*"
   }
 }
-
