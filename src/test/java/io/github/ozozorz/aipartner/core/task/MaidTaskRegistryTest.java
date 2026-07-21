@@ -20,7 +20,8 @@ class MaidTaskRegistryTest {
                 java.util.Set.of(
                         JobType.COLLECT_BLOCK,
                         JobType.DEPOSIT_ITEM,
-                        JobType.COLLECT_AND_DEPOSIT
+                        JobType.COLLECT_AND_DEPOSIT,
+                        JobType.TRANSFER_ITEM
                 ),
                 registry.registeredJobTypes()
         );

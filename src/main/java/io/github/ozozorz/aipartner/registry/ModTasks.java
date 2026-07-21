@@ -4,6 +4,7 @@ import io.github.ozozorz.aipartner.core.task.MaidTaskRegistry;
 import io.github.ozozorz.aipartner.gameplay.task.CollectAndDepositMaidTask;
 import io.github.ozozorz.aipartner.gameplay.task.CollectBlockMaidTask;
 import io.github.ozozorz.aipartner.gameplay.task.DepositItemMaidTask;
+import io.github.ozozorz.aipartner.gameplay.task.TransferItemMaidTask;
 import io.github.ozozorz.aipartner.job.JobType;
 
 /**
@@ -20,6 +21,7 @@ public final class ModTasks {
         return new MaidTaskRegistry()
                 .register(JobType.COLLECT_BLOCK, CollectBlockMaidTask.ID, CollectBlockMaidTask::new)
                 .register(JobType.DEPOSIT_ITEM, DepositItemMaidTask.ID, DepositItemMaidTask::new)
+                .register(JobType.TRANSFER_ITEM, TransferItemMaidTask.ID, TransferItemMaidTask::new)
                 .register(
                         JobType.COLLECT_AND_DEPOSIT,
                         CollectAndDepositMaidTask.ID,

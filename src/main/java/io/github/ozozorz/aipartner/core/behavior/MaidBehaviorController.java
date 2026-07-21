@@ -16,6 +16,7 @@ public final class MaidBehaviorController {
     private ManualDirective manualDirective = ManualDirective.NONE;
     private PartnerMode taskMode = PartnerMode.IDLE;
     private PartnerMode backgroundMode = PartnerMode.IDLE;
+    private PartnerMode temporaryInterruptionMode = PartnerMode.IDLE;
     private boolean inventoryMenuOpen;
 
     public MaidBehaviorController(AiPartnerEntity partner) {
@@ -62,10 +63,39 @@ public final class MaidBehaviorController {
     }
 
     public PartnerMode effectiveMode() {
+        if (temporaryInterruptionMode != PartnerMode.IDLE) {
+            return temporaryInterruptionMode;
+        }
+        return baseEffectiveMode();
+    }
+
+    private PartnerMode baseEffectiveMode() {
         if (manualDirective != ManualDirective.NONE) {
             return manualDirective.displayedMode();
         }
         return taskMode == PartnerMode.IDLE ? backgroundMode : taskMode;
+    }
+
+    /**
+     * 战斗等瞬时高优先级行为只覆盖显示和 tick 推进，不销毁原任务或长期指令。
+     */
+    public void setTemporaryInterruption(PartnerMode mode) {
+        if (mode == PartnerMode.IDLE) {
+            throw new IllegalArgumentException("Temporary interruption mode may not be IDLE");
+        }
+        temporaryInterruptionMode = Objects.requireNonNull(mode, "mode");
+        synchronizeMode();
+    }
+
+    public void clearTemporaryInterruption() {
+        if (temporaryInterruptionMode != PartnerMode.IDLE) {
+            temporaryInterruptionMode = PartnerMode.IDLE;
+            synchronizeMode();
+        }
+    }
+
+    public boolean isTemporarilyInterrupted() {
+        return temporaryInterruptionMode != PartnerMode.IDLE;
     }
 
     public boolean isFollowing() {
@@ -91,7 +121,7 @@ public final class MaidBehaviorController {
      */
     public void save(ValueOutput output) {
         output.putString(MANUAL_DIRECTIVE_TAG, manualDirective.name());
-        output.putString("PartnerMode", effectiveMode().name());
+        output.putString("PartnerMode", baseEffectiveMode().name());
     }
 
     /**
@@ -104,6 +134,7 @@ public final class MaidBehaviorController {
                 .orElseGet(() -> ManualDirective.fromLegacyMode(legacyMode));
         taskMode = manualDirective == ManualDirective.NONE ? legacyMode : PartnerMode.IDLE;
         backgroundMode = PartnerMode.IDLE;
+        temporaryInterruptionMode = PartnerMode.IDLE;
         inventoryMenuOpen = false;
         synchronizeMode();
     }

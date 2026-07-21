@@ -96,7 +96,7 @@ public final class ExperimentScenarioJudge {
         }
         return switch (candidate.type()) {
             case COLLECT_BLOCK -> terminal.partnerTargetItems() - initial.partnerTargetItems() >= candidate.quantity();
-            case DEPOSIT_ITEM, COLLECT_AND_DEPOSIT ->
+            case DEPOSIT_ITEM, TRANSFER_ITEM, COLLECT_AND_DEPOSIT ->
                     terminal.chestTargetItems() - initial.chestTargetItems() >= candidate.quantity();
             case CANCEL -> taskExecutionStopped(terminal);
             case FOLLOW, STAY -> true;

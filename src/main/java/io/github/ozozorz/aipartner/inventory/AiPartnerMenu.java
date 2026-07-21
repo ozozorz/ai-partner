@@ -3,6 +3,7 @@ package io.github.ozozorz.aipartner.inventory;
 import io.github.ozozorz.aipartner.contract.ContractDecision;
 import io.github.ozozorz.aipartner.contract.ContractStatus;
 import io.github.ozozorz.aipartner.contract.JobSpec;
+import io.github.ozozorz.aipartner.combat.CombatPolicy;
 import io.github.ozozorz.aipartner.core.order.MaidOrderService;
 import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
@@ -14,6 +15,7 @@ import io.github.ozozorz.aipartner.core.schedule.ScheduleActivity;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
 import io.github.ozozorz.aipartner.life.ActivityLocationType;
 import io.github.ozozorz.aipartner.registry.ModMenus;
+import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import java.util.Optional;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.Identifier;
@@ -70,7 +72,9 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
     private static final int DATA_GROWTH_LEVEL = 12;
     private static final int DATA_GROWTH_EXPERIENCE = 13;
     private static final int DATA_MAX_ACTIVITY_RADIUS = 14;
-    private static final int DATA_COUNT = 15;
+    private static final int DATA_WORK_MODE = 15;
+    private static final int DATA_COMBAT_POLICY = 16;
+    private static final int DATA_COUNT = 17;
 
     private final @Nullable AiPartnerEntity partner;
     private final ContainerData stateData;
@@ -255,6 +259,8 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
                     MaidGameplayConfig.get().maximumActivityRadius(),
                     partner.getActivityRadius() + 1
             ));
+            case CYCLE_WORK_MODE -> partner.cycleWorkMode();
+            case CYCLE_COMBAT_POLICY -> partner.cycleCombatPolicy();
             case FOLLOW, STAY, CANCEL -> {
                 return false;
             }
@@ -338,6 +344,18 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
         return stateData.get(DATA_GROWTH_EXPERIENCE);
     }
 
+    public MaidWorkMode displayedWorkMode() {
+        return enumByOrdinal(MaidWorkMode.values(), stateData.get(DATA_WORK_MODE), MaidWorkMode.NONE);
+    }
+
+    public CombatPolicy displayedCombatPolicy() {
+        return enumByOrdinal(
+                CombatPolicy.values(),
+                stateData.get(DATA_COMBAT_POLICY),
+                CombatPolicy.DEFEND_OWNER
+        );
+    }
+
     private boolean tryQuickEquip(ItemStack itemStack) {
         if (partner == null || itemStack.isEmpty()) {
             return false;
@@ -377,6 +395,8 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
                     case DATA_GROWTH_LEVEL -> partner.getGrowthLevel();
                     case DATA_GROWTH_EXPERIENCE -> partner.getGrowthExperience();
                     case DATA_MAX_ACTIVITY_RADIUS -> MaidGameplayConfig.get().maximumActivityRadius();
+                    case DATA_WORK_MODE -> partner.getWorkMode().ordinal();
+                    case DATA_COMBAT_POLICY -> partner.getCombatPolicy().ordinal();
                     default -> 0;
                 };
             }

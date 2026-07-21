@@ -35,6 +35,11 @@ public final class AllowedTargets {
         return ALLOWED_LOGS.stream().map(Identifier::toString).sorted().toList();
     }
 
+    /** 返回通用物流命令可补全的全部已注册物品标识。 */
+    public static List<String> suggestedItemIds() {
+        return BuiltInRegistries.ITEM.keySet().stream().map(Identifier::toString).sorted().toList();
+    }
+
     /**
      * 解析并验证白名单方块标识。
      */
@@ -71,10 +76,13 @@ public final class AllowedTargets {
         return new ItemStack(item).isEmpty() ? Optional.empty() : Optional.of(item);
     }
 
-    /**
-     * 第一版只允许把受支持原木存入箱子，避免任意物品操作扩大实验边界。
-     */
+    /** 解析通用物流物品；空气和不存在的资源不会成为可执行目标。 */
     public static Optional<Item> resolveDepositableItem(String rawId) {
-        return resolveCollectibleBlock(rawId).flatMap(AllowedTargets::asCollectibleItem);
+        Identifier id = Identifier.tryParse(rawId);
+        if (id == null) {
+            return Optional.empty();
+        }
+        return BuiltInRegistries.ITEM.getOptional(id)
+                .filter(item -> !new ItemStack(item).isEmpty());
     }
 }

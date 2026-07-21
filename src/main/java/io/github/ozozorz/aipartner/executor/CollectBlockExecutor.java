@@ -14,7 +14,6 @@ import net.minecraft.core.SectionPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.gamerules.GameRules;
 import org.jspecify.annotations.Nullable;
@@ -25,7 +24,8 @@ import org.jspecify.annotations.Nullable;
 public final class CollectBlockExecutor {
     private static final int SEARCH_BUDGET_PER_TICK = 1024;
     private static final int BREAK_DURATION_TICKS = 16;
-    private static final int PICKUP_TIMEOUT_TICKS = 60;
+    private static final int PICKUP_TIMEOUT_TICKS = 100;
+    private static final double PICKUP_SEARCH_RADIUS = 4.0;
     private static final double INTERACTION_DISTANCE_SQUARED = 9.0;
 
     private final AiPartnerEntity partner;
@@ -122,7 +122,7 @@ public final class CollectBlockExecutor {
             case NAVIGATE -> navigateToTarget(level);
             case CHECK_TARGET -> checkTarget(level);
             case BREAK_BLOCK -> breakTarget(level);
-            case PICK_UP -> waitForPickup();
+            case PICK_UP -> waitForPickup(level);
             case CHECK_GOAL -> checkGoal();
             case IDLE, COMPLETE, FAILED -> {
                 // 终态不再产生世界动作。
@@ -269,30 +269,18 @@ public final class CollectBlockExecutor {
             return;
         }
 
-        boolean destroyed = actions.breakBlock().destroy(level, targetPosition);
+        boolean destroyed = actions.breakBlock().destroyWithDrops(level, targetPosition);
         if (!destroyed) {
             handleUnavailableTarget(FailureCode.PERMISSION_DENIED);
-            return;
-        }
-        ItemStack remainder = partner.getInventory().addItem(new ItemStack(targetItem));
-        if (!remainder.isEmpty()) {
-            level.addFreshEntity(new ItemEntity(
-                    level,
-                    targetPosition.getX() + 0.5,
-                    targetPosition.getY() + 0.5,
-                    targetPosition.getZ() + 0.5,
-                    remainder
-            ));
-            fail(FailureCode.INVENTORY_FULL);
             return;
         }
         transitionTo(State.PICK_UP);
     }
 
     /**
-     * 验证服务器端原子采集已入包；这样可消除掉落实体寻路对跨系统实验的随机干扰。
+     * 等待通用拾取层收取原版战利品表生成的掉落实体。
      */
-    private void waitForPickup() {
+    private void waitForPickup(ServerLevel level) {
         if (goalSatisfied() || partner.countItem(targetItem) > countBeforeBreak) {
             actions.navigation().stop();
             transitionTo(State.CHECK_GOAL);
@@ -301,6 +289,18 @@ public final class CollectBlockExecutor {
         if (!partner.canStore(targetItem)) {
             fail(FailureCode.INVENTORY_FULL);
             return;
+        }
+        ItemEntity drop = actions.pickupItem().findNearest(
+                level,
+                targetPosition,
+                PICKUP_SEARCH_RADIUS,
+                candidate -> candidate.getItem().is(targetItem)
+        ).orElse(null);
+        if (drop != null && stateTicks % 5 == 1) {
+            actions.pickupItem().moveTo(drop, 1.1);
+        } else if (drop == null && stateTicks % 10 == 1) {
+            // 掉落实体可能仍处于生成后的短暂弹跳阶段，先回到破坏点等待下一次扫描。
+            actions.navigation().moveTo(targetPosition, 1.0);
         }
         if (stateTicks >= PICKUP_TIMEOUT_TICKS) {
             actions.navigation().stop();

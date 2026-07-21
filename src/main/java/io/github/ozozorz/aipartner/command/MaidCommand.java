@@ -10,6 +10,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.github.ozozorz.aipartner.AiPartnerMod;
 import io.github.ozozorz.aipartner.contract.ContractDecision;
 import io.github.ozozorz.aipartner.contract.JobSpec;
+import io.github.ozozorz.aipartner.combat.CombatPolicy;
 import io.github.ozozorz.aipartner.core.order.MaidOrderService;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
 import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
@@ -37,12 +38,14 @@ import io.github.ozozorz.aipartner.life.ActivityLocationType;
 import io.github.ozozorz.aipartner.parser.RuleJobParser;
 import io.github.ozozorz.aipartner.service.PartnerService;
 import io.github.ozozorz.aipartner.world.WorldStateSummary;
+import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.IdentifierArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.MinecraftServer;
@@ -103,12 +106,30 @@ public final class MaidCommand {
                                                 MaidGameplayConfig.get().maximumActivityRadius()
                                         )
                                 ).executes(MaidCommand::setActivityRadius)))
+                        .then(Commands.literal("work")
+                                .executes(MaidCommand::showWorkMode)
+                                .then(Commands.argument("mode", StringArgumentType.word())
+                                        .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                                                java.util.Arrays.stream(MaidWorkMode.values())
+                                                        .map(MaidWorkMode::serializedName),
+                                                builder
+                                        ))
+                                        .executes(MaidCommand::setWorkMode)))
+                        .then(Commands.literal("combat")
+                                .executes(MaidCommand::showCombatPolicy)
+                                .then(Commands.argument("policy", StringArgumentType.word())
+                                        .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                                                java.util.Arrays.stream(CombatPolicy.values())
+                                                        .map(CombatPolicy::serializedName),
+                                                builder
+                                        ))
+                                        .executes(MaidCommand::setCombatPolicy)))
                         .then(createExperimentCommand())
                         .then(Commands.literal("follow").executes(context -> runBasicJob(context, JobType.FOLLOW)))
                         .then(Commands.literal("stay").executes(context -> runBasicJob(context, JobType.STAY)))
                         .then(Commands.literal("cancel").executes(context -> runBasicJob(context, JobType.CANCEL)))
                         .then(Commands.literal("collect")
-                                .then(Commands.argument("block", StringArgumentType.word())
+                                .then(Commands.argument("block", IdentifierArgument.id())
                                         .suggests((context, builder) -> SharedSuggestionProvider.suggest(
                                                 AllowedTargets.suggestedBlockIds(),
                                                 builder
@@ -127,7 +148,7 @@ public final class MaidCommand {
                                                 )))
                                         )))
                         .then(Commands.literal("deposit")
-                                .then(Commands.argument("item", StringArgumentType.word())
+                                .then(Commands.argument("item", IdentifierArgument.id())
                                         .suggests((context, builder) -> SharedSuggestionProvider.suggest(
                                                 AllowedTargets.suggestedBlockIds(),
                                                 builder
@@ -145,8 +166,27 @@ public final class MaidCommand {
                                                         IntegerArgumentType.getInteger(context, "radius")
                                                 )))
                                         )))
+                        .then(Commands.literal("transfer")
+                                .then(Commands.argument("item", IdentifierArgument.id())
+                                        .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                                                AllowedTargets.suggestedItemIds(),
+                                                builder
+                                        ))
+                                        .then(Commands.argument("quantity", IntegerArgumentType.integer(1, 64))
+                                                .executes(context -> runTransferJob(
+                                                        context,
+                                                        ContainerTargets.DEFAULT_DEPOSIT_RADIUS
+                                                ))
+                                                .then(Commands.argument(
+                                                        "radius",
+                                                        IntegerArgumentType.integer(1, ContainerTargets.MAX_DEPOSIT_RADIUS)
+                                                ).executes(context -> runTransferJob(
+                                                        context,
+                                                        IntegerArgumentType.getInteger(context, "radius")
+                                                )))
+                                        )))
                         .then(Commands.literal("collect-and-deposit")
-                                .then(Commands.argument("block", StringArgumentType.word())
+                                .then(Commands.argument("block", IdentifierArgument.id())
                                         .suggests((context, builder) -> SharedSuggestionProvider.suggest(
                                                 AllowedTargets.suggestedBlockIds(),
                                                 builder
@@ -437,6 +477,76 @@ public final class MaidCommand {
         return 1;
     }
 
+    private static int showWorkMode(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity partner = requirePartner(context, player);
+        if (partner == null) {
+            return 0;
+        }
+        context.getSource().sendSuccess(() -> Component.translatable(
+                "message.ai-partner.work_mode_current",
+                partner.getWorkMode().serializedName(),
+                partner.getWorkExecutionState()
+        ), false);
+        return 1;
+    }
+
+    private static int setWorkMode(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity partner = requirePartner(context, player);
+        if (partner == null) {
+            return 0;
+        }
+        String requested = StringArgumentType.getString(context, "mode");
+        MaidWorkMode mode = MaidWorkMode.parse(requested).orElse(null);
+        if (mode == null) {
+            context.getSource().sendFailure(Component.translatable("message.ai-partner.invalid_work_mode", requested));
+            return 0;
+        }
+        partner.setWorkMode(mode);
+        context.getSource().sendSuccess(() -> Component.translatable(
+                "message.ai-partner.work_mode_set",
+                mode.serializedName()
+        ), false);
+        return 1;
+    }
+
+    private static int showCombatPolicy(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity partner = requirePartner(context, player);
+        if (partner == null) {
+            return 0;
+        }
+        context.getSource().sendSuccess(() -> Component.translatable(
+                "message.ai-partner.combat_policy_current",
+                partner.getCombatPolicy().serializedName()
+        ), false);
+        return 1;
+    }
+
+    private static int setCombatPolicy(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity partner = requirePartner(context, player);
+        if (partner == null) {
+            return 0;
+        }
+        String requested = StringArgumentType.getString(context, "policy");
+        CombatPolicy policy = CombatPolicy.parse(requested).orElse(null);
+        if (policy == null) {
+            context.getSource().sendFailure(Component.translatable(
+                    "message.ai-partner.invalid_combat_policy",
+                    requested
+            ));
+            return 0;
+        }
+        partner.setCombatPolicy(policy);
+        context.getSource().sendSuccess(() -> Component.translatable(
+                "message.ai-partner.combat_policy_set",
+                policy.serializedName()
+        ), false);
+        return 1;
+    }
+
     private static AiPartnerEntity requirePartner(
             CommandContext<CommandSourceStack> context,
             ServerPlayer player
@@ -466,7 +576,12 @@ public final class MaidCommand {
                         "message.ai-partner.status",
                         partner.getMode().name(),
                         jobType,
-                        contractStatus
+                        contractStatus,
+                        partner.getWorkMode().serializedName(),
+                        partner.getCombatPolicy().serializedName(),
+                        partner.getGrowthLevel(),
+                        partner.getGrowthExperience(),
+                        partner.getAffection()
                 ),
                 false
         );
@@ -850,7 +965,7 @@ public final class MaidCommand {
             int radius
     ) throws CommandSyntaxException {
         cancelPendingRequest(context.getSource().getPlayerOrException().getUUID());
-        String block = StringArgumentType.getString(context, "block");
+        String block = IdentifierArgument.getId(context, "block").toString();
         int quantity = IntegerArgumentType.getInteger(context, "quantity");
         return compileAndRun(
                 context,
@@ -864,7 +979,7 @@ public final class MaidCommand {
             int radius
     ) throws CommandSyntaxException {
         cancelPendingRequest(context.getSource().getPlayerOrException().getUUID());
-        String item = StringArgumentType.getString(context, "item");
+        String item = IdentifierArgument.getId(context, "item").toString();
         int quantity = IntegerArgumentType.getInteger(context, "quantity");
         return compileAndRun(
                 context,
@@ -873,12 +988,27 @@ public final class MaidCommand {
         );
     }
 
+    /** 通用物流与冻结 v0.4 存箱任务使用独立 JobType，避免改变旧实验白名单。 */
+    private static int runTransferJob(
+            CommandContext<CommandSourceStack> context,
+            int radius
+    ) throws CommandSyntaxException {
+        cancelPendingRequest(context.getSource().getPlayerOrException().getUUID());
+        String item = IdentifierArgument.getId(context, "item").toString();
+        int quantity = IntegerArgumentType.getInteger(context, "quantity");
+        return compileAndRun(
+                context,
+                new JobSpec(JobType.TRANSFER_ITEM, item, quantity, radius),
+                "transfer " + item + " " + quantity + " " + radius
+        );
+    }
+
     private static int runCollectAndDepositJob(
             CommandContext<CommandSourceStack> context,
             int radius
     ) throws CommandSyntaxException {
         cancelPendingRequest(context.getSource().getPlayerOrException().getUUID());
-        String block = StringArgumentType.getString(context, "block");
+        String block = IdentifierArgument.getId(context, "block").toString();
         int quantity = IntegerArgumentType.getInteger(context, "quantity");
         return compileAndRun(
                 context,
@@ -1055,6 +1185,7 @@ public final class MaidCommand {
             case COLLECT_BLOCK -> "message.ai-partner.collecting";
             case DEPOSIT_ITEM -> "message.ai-partner.depositing";
             case COLLECT_AND_DEPOSIT -> "message.ai-partner.collecting_and_depositing";
+            case TRANSFER_ITEM -> "message.ai-partner.transferring";
         };
     }
 

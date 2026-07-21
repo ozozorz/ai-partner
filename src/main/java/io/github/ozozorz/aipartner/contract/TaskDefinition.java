@@ -36,11 +36,15 @@ public record TaskDefinition(
         if (!targetRequired) {
             return candidate.target().isEmpty() && candidate.quantity() == 0 && candidate.radius() == 0;
         }
-        return allowedTargets.contains(candidate.target())
+        return acceptsTarget(candidate.target())
                 && candidate.quantity() >= minimumQuantity
                 && candidate.quantity() <= maximumQuantity
                 && candidate.radius() >= minimumRadius
                 && candidate.radius() <= maximumRadius;
     }
-}
 
+    /** `*` 只表示由任务专属验证器解析任意已注册资源，不绕过资源存在性检查。 */
+    public boolean acceptsTarget(String target) {
+        return allowedTargets.contains("*") ? target != null && !target.isBlank() : allowedTargets.contains(target);
+    }
+}

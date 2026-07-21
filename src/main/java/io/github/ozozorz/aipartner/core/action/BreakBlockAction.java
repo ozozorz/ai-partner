@@ -26,8 +26,26 @@ public final class BreakBlockAction {
      * 使用女仆作为破坏者执行一次原版方块修改。
      */
     public boolean destroy(ServerLevel level, BlockPos position) {
+        return destroy(level, position, false);
+    }
+
+    /**
+     * 使用服务端原版战利品表生成掉落物，并让当前主手承担对应挖掘耐久。
+     */
+    public boolean destroyWithDrops(ServerLevel level, BlockPos position) {
+        return destroy(level, position, true);
+    }
+
+    /**
+     * 移除火焰等不应触发工具挖掘耐久的瞬时方块。
+     */
+    public boolean removeWithoutTool(ServerLevel level, BlockPos position) {
+        return level.destroyBlock(position, false, partner, Block.UPDATE_LIMIT);
+    }
+
+    private boolean destroy(ServerLevel level, BlockPos position, boolean dropResources) {
         BlockState state = level.getBlockState(position);
-        boolean destroyed = level.destroyBlock(position, false, partner, Block.UPDATE_LIMIT);
+        boolean destroyed = level.destroyBlock(position, dropResources, partner, Block.UPDATE_LIMIT);
         if (destroyed && !partner.getMainHandItem().isEmpty()) {
             partner.getMainHandItem().getItem().mineBlock(
                     partner.getMainHandItem(),

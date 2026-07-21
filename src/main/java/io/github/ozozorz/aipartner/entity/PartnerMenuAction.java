@@ -22,7 +22,9 @@ public enum PartnerMenuAction {
     SET_SLEEP_LOCATION(10, null, "message.ai-partner.location_changed"),
     CLEAR_SLEEP_LOCATION(11, null, "message.ai-partner.location_changed"),
     DECREASE_RADIUS(12, null, "message.ai-partner.radius_changed"),
-    INCREASE_RADIUS(13, null, "message.ai-partner.radius_changed");
+    INCREASE_RADIUS(13, null, "message.ai-partner.radius_changed"),
+    CYCLE_WORK_MODE(14, null, "message.ai-partner.work_mode_changed"),
+    CYCLE_COMBAT_POLICY(15, null, "message.ai-partner.combat_policy_changed");
 
     private final int buttonId;
     private final @Nullable JobType jobType;

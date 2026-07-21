@@ -27,7 +27,7 @@ public final class ContractCompiler {
             return ContractDecision.rejected(FailureCode.UNSUPPORTED_JOB, "message.ai-partner.unsupported_milestone");
         }
         if (!definition.acceptsShape(candidate)) {
-            if (definition.targetRequired() && !definition.allowedTargets().contains(candidate.target())) {
+            if (definition.targetRequired() && !definition.acceptsTarget(candidate.target())) {
                 return ContractDecision.rejected(FailureCode.UNSUPPORTED_JOB, "message.ai-partner.target_not_allowed");
             }
             return ContractDecision.rejected(FailureCode.INVALID_PARAMETER, "message.ai-partner.invalid_parameter");

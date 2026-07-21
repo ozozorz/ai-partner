@@ -1,6 +1,8 @@
 package io.github.ozozorz.aipartner.growth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -30,5 +32,14 @@ class MaidGrowthDataTest {
 
         assertEquals(MaidGrowthData.MAX_AFFECTION, data.affection());
         assertEquals(0, data.experience());
+    }
+
+    @Test
+    void grantsFirstCompletionOnlyOncePerWorkMode() {
+        MaidGrowthData data = new MaidGrowthData();
+
+        assertTrue(data.markFirstWorkCompletion(3));
+        assertFalse(data.markFirstWorkCompletion(3));
+        assertTrue(data.markFirstWorkCompletion(4));
     }
 }

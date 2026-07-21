@@ -22,7 +22,7 @@ public final class DepositItemContractValidator implements TaskContractValidator
     public ContractDecision validate(AiPartnerEntity partner, ServerPlayer player, JobSpec candidate) {
         Item item = AllowedTargets.resolveDepositableItem(candidate.target()).orElse(null);
         if (item == null) {
-            return ContractDecision.rejected(FailureCode.UNSUPPORTED_JOB, "message.ai-partner.target_not_allowed");
+            return ContractDecision.rejected(FailureCode.UNSUPPORTED_JOB, "message.ai-partner.item_not_registered");
         }
         if (partner.countItem(item) < candidate.quantity()) {
             return ContractDecision.rejected(FailureCode.MISSING_ITEM, "message.ai-partner.missing_item");

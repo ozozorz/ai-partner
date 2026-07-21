@@ -58,6 +58,12 @@ public final class TaskDefinitionRegistry {
                 AllowedTargets.MAX_COLLECT_RADIUS,
                 allowedLogs
         ));
+        definitions.put(JobType.TRANSFER_ITEM, bounded(
+                JobType.TRANSFER_ITEM,
+                true,
+                ContainerTargets.MAX_DEPOSIT_RADIUS,
+                Set.of("*")
+        ));
         return definitions;
     }
 

@@ -38,6 +38,8 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
     private Button workLocationClearButton;
     private Button leisureLocationClearButton;
     private Button sleepLocationClearButton;
+    private Button workModeButton;
+    private Button combatPolicyButton;
 
     public AiPartnerScreen(AiPartnerMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title, AiPartnerMenu.SCREEN_WIDTH, AiPartnerMenu.SCREEN_HEIGHT);
@@ -114,6 +116,20 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
                 334,
                 174,
                 40
+        ));
+        workModeButton = addRenderableWidget(createSideButton(
+                PartnerMenuAction.CYCLE_WORK_MODE,
+                "gui.ai-partner.work_mode_button",
+                8,
+                174,
+                96
+        ));
+        combatPolicyButton = addRenderableWidget(createSideButton(
+                PartnerMenuAction.CYCLE_COMBAT_POLICY,
+                "gui.ai-partner.combat_policy_button",
+                8,
+                196,
+                96
         ));
         updateButtonStates();
     }
@@ -253,7 +269,9 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
                 || radiusIncreaseButton == null
                 || workLocationClearButton == null
                 || leisureLocationClearButton == null
-                || sleepLocationClearButton == null) {
+                || sleepLocationClearButton == null
+                || workModeButton == null
+                || combatPolicyButton == null) {
             return;
         }
         PartnerMode mode = menu.displayedMode();
@@ -277,6 +295,16 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
         workLocationClearButton.active = hasConfiguredLocation(locationMask, ActivityLocationType.WORK);
         leisureLocationClearButton.active = hasConfiguredLocation(locationMask, ActivityLocationType.LEISURE);
         sleepLocationClearButton.active = hasConfiguredLocation(locationMask, ActivityLocationType.SLEEP);
+        workModeButton.setMessage(Component.translatable(
+                "gui.ai-partner.work_mode_button",
+                Component.translatable("work_mode.ai-partner." + menu.displayedWorkMode().serializedName())
+        ));
+        combatPolicyButton.setMessage(Component.translatable(
+                "gui.ai-partner.combat_policy_button",
+                Component.translatable(
+                        "combat_policy.ai-partner." + menu.displayedCombatPolicy().serializedName()
+                )
+        ));
     }
 
     private Component modeLine() {

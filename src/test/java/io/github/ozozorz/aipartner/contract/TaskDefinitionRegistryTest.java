@@ -24,6 +24,7 @@ class TaskDefinitionRegistryTest {
         assertTrue(TaskDefinitionRegistry.get(JobType.DEPOSIT_ITEM).implemented());
         assertTrue(TaskDefinitionRegistry.get(JobType.CANCEL).implemented());
         assertTrue(TaskDefinitionRegistry.get(JobType.COLLECT_AND_DEPOSIT).implemented());
+        assertTrue(TaskDefinitionRegistry.get(JobType.TRANSFER_ITEM).implemented());
     }
 
     @Test
@@ -36,5 +37,18 @@ class TaskDefinitionRegistryTest {
                 8,
                 16
         )));
+    }
+
+    @Test
+    void transferDefinitionAcceptsAnyNonBlankRegisteredCandidateShape() {
+        TaskDefinition definition = TaskDefinitionRegistry.get(JobType.TRANSFER_ITEM);
+
+        assertTrue(definition.acceptsShape(new JobSpec(
+                JobType.TRANSFER_ITEM,
+                "minecraft:iron_ingot",
+                8,
+                16
+        )));
+        assertFalse(definition.acceptsShape(new JobSpec(JobType.TRANSFER_ITEM, "", 8, 16)));
     }
 }

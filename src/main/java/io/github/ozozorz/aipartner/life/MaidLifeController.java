@@ -99,6 +99,11 @@ public final class MaidLifeController {
             partner.getNavigation().stop();
             return;
         }
+        if (behaviorController.isTemporarilyInterrupted()) {
+            movementTarget = null;
+            wakeUp();
+            return;
+        }
 
         ManualDirective directive = behaviorController.manualDirective();
         if (taskRuntime.hasFiniteTaskRunning()) {
@@ -225,8 +230,47 @@ public final class MaidLifeController {
     public boolean canUseAmbientMovement() {
         return !taskRuntime.hasRunningContract()
                 && behaviorController.manualDirective() == ManualDirective.NONE
+                && !behaviorController.isTemporarilyInterrupted()
                 && currentActivity != ScheduleActivity.SLEEP
                 && movementTarget == null;
+    }
+
+    /**
+     * 返回 WORK 活动对应的权威地点；未显式配置时回退到生成时默认家位置。
+     */
+    public Optional<ActivityLocation> scheduledWorkBoundary() {
+        return profile.locationFor(ScheduleActivity.WORK)
+                .filter(location -> location.isIn(partner.level()));
+    }
+
+    /**
+     * 持续工作只能在 WORK 时段、无手动/有限任务/战斗中断且已抵达工作区时推进。
+     */
+    public boolean canPerformScheduledWork() {
+        return currentActivity == ScheduleActivity.WORK
+                && !behaviorController.isInventoryMenuOpen()
+                && !behaviorController.isTemporarilyInterrupted()
+                && !taskRuntime.hasFiniteTaskRunning()
+                && behaviorController.manualDirective() == ManualDirective.NONE
+                && scheduledWorkBoundary()
+                .map(location -> location.contains(partner.level(), partner.blockPosition()))
+                .orElse(false);
+    }
+
+    /**
+     * 战斗目标受待命锚点或当前活动地点约束，FOLLOW 与直接有限任务仅保留距离上限。
+     */
+    public boolean permitsCombatAt(BlockPos position) {
+        ManualDirective directive = behaviorController.manualDirective();
+        if (directive == ManualDirective.STAY) {
+            return stayAnchor != null && stayAnchor.contains(partner.level(), position);
+        }
+        if (directive == ManualDirective.FOLLOW || taskRuntime.hasFiniteTaskRunning()) {
+            return true;
+        }
+        return profile.locationFor(currentActivity)
+                .map(location -> location.contains(partner.level(), position))
+                .orElse(true);
     }
 
     /**

@@ -9,19 +9,39 @@ import java.util.Objects;
 public record MaidActions(
         NavigateAction navigation,
         BreakBlockAction breakBlock,
-        TransferItemAction transferItem
+        TransferItemAction transferItem,
+        InventoryAction inventory,
+        HarvestBlockAction harvestBlock,
+        PlaceBlockAction placeBlock,
+        InteractEntityAction interactEntity,
+        RangedAttackAction rangedAttack,
+        PickupItemAction pickupItem
 ) {
     public MaidActions {
         Objects.requireNonNull(navigation, "navigation");
         Objects.requireNonNull(breakBlock, "breakBlock");
         Objects.requireNonNull(transferItem, "transferItem");
+        Objects.requireNonNull(inventory, "inventory");
+        Objects.requireNonNull(harvestBlock, "harvestBlock");
+        Objects.requireNonNull(placeBlock, "placeBlock");
+        Objects.requireNonNull(interactEntity, "interactEntity");
+        Objects.requireNonNull(rangedAttack, "rangedAttack");
+        Objects.requireNonNull(pickupItem, "pickupItem");
     }
 
     public static MaidActions create(AiPartnerEntity partner) {
+        InventoryAction inventory = new InventoryAction(partner);
+        BreakBlockAction breakBlock = new BreakBlockAction(partner);
         return new MaidActions(
                 new NavigateAction(partner),
-                new BreakBlockAction(partner),
-                new TransferItemAction()
+                breakBlock,
+                new TransferItemAction(),
+                inventory,
+                new HarvestBlockAction(partner, inventory),
+                new PlaceBlockAction(partner),
+                new InteractEntityAction(partner, inventory),
+                new RangedAttackAction(partner, inventory),
+                new PickupItemAction(partner)
         );
     }
 }

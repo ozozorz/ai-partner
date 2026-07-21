@@ -44,6 +44,7 @@ public final class ModContractValidators {
                 .register(JobType.COLLECT_BLOCK, new CollectBlockContractValidator())
                 .register(JobType.DEPOSIT_ITEM, new DepositItemContractValidator())
                 .register(JobType.COLLECT_AND_DEPOSIT, new CollectAndDepositContractValidator())
+                .register(JobType.TRANSFER_ITEM, new DepositItemContractValidator())
                 .freeze();
     }
 }

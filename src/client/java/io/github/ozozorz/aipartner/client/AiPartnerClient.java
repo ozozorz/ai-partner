@@ -1,6 +1,7 @@
 package io.github.ozozorz.aipartner.client;
 
 import io.github.ozozorz.aipartner.client.render.AiPartnerRenderer;
+import io.github.ozozorz.aipartner.client.render.MaidFishingHookRenderer;
 import io.github.ozozorz.aipartner.client.screen.AiPartnerScreen;
 import io.github.ozozorz.aipartner.client.skin.MaidSkinClient;
 import io.github.ozozorz.aipartner.registry.ModEntities;
@@ -16,6 +17,7 @@ public final class AiPartnerClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         EntityRenderers.register(ModEntities.AI_PARTNER, AiPartnerRenderer::new);
+        EntityRenderers.register(ModEntities.MAID_FISHING_HOOK, MaidFishingHookRenderer::new);
         MenuScreens.register(ModMenus.AI_PARTNER, AiPartnerScreen::new);
         MaidSkinClient.register();
     }

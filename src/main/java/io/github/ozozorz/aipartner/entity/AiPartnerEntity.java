@@ -2,6 +2,8 @@ package io.github.ozozorz.aipartner.entity;
 
 import io.github.ozozorz.aipartner.contract.FailureCode;
 import io.github.ozozorz.aipartner.contract.TaskContract;
+import io.github.ozozorz.aipartner.combat.CombatPolicy;
+import io.github.ozozorz.aipartner.combat.MaidCombatController;
 import io.github.ozozorz.aipartner.core.behavior.MaidBehaviorController;
 import io.github.ozozorz.aipartner.core.behavior.ManualDirective;
 import io.github.ozozorz.aipartner.core.task.MaidTaskRuntime;
@@ -9,9 +11,13 @@ import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
 import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
 import io.github.ozozorz.aipartner.entity.goal.AiPartnerFollowOwnerGoal;
 import io.github.ozozorz.aipartner.entity.goal.AiPartnerIdleWanderGoal;
+import io.github.ozozorz.aipartner.entity.goal.AiPartnerMeleeCombatGoal;
+import io.github.ozozorz.aipartner.entity.goal.AiPartnerRangedCombatGoal;
 import io.github.ozozorz.aipartner.entity.goal.AiPartnerReturnToActivityGoal;
 import io.github.ozozorz.aipartner.entity.navigation.AiPartnerPathNavigation;
 import io.github.ozozorz.aipartner.growth.MaidGrowthData;
+import io.github.ozozorz.aipartner.growth.MaidGrowthController;
+import io.github.ozozorz.aipartner.growth.MaidGrowthProgression;
 import io.github.ozozorz.aipartner.inventory.MaidInventoryPersistence;
 import io.github.ozozorz.aipartner.inventory.AiPartnerMenu;
 import io.github.ozozorz.aipartner.life.ActivityLocation;
@@ -21,6 +27,8 @@ import io.github.ozozorz.aipartner.life.MaidLifeController;
 import io.github.ozozorz.aipartner.life.MaidPickupController;
 import io.github.ozozorz.aipartner.registry.ModTasks;
 import io.github.ozozorz.aipartner.service.PartnerService;
+import io.github.ozozorz.aipartner.work.MaidWorkController;
+import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleActivity;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
 import java.util.ArrayList;
@@ -54,6 +62,7 @@ import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
 import net.minecraft.world.entity.ai.goal.OpenDoorGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
+import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.InventoryCarrier;
@@ -75,7 +84,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>实体只负责生命周期、同步字段、物品栏和原版交互；行为仲裁与有限任务由核心运行时管理。</p>
  */
-public final class AiPartnerEntity extends TamableAnimal implements InventoryCarrier, ExtendedMenuProvider<Integer> {
+public final class AiPartnerEntity extends TamableAnimal implements InventoryCarrier, ExtendedMenuProvider<Integer>, RangedAttackMob {
     private static final EntityDataAccessor<Integer> DATA_MODE = SynchedEntityData.defineId(
             AiPartnerEntity.class,
             EntityDataSerializers.INT
@@ -95,6 +104,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
 
     private final SimpleContainer inventory = new SimpleContainer(MaidInventoryPersistence.STORAGE_SLOT_COUNT);
     private final MaidGrowthData growthData = new MaidGrowthData();
+    private final MaidGrowthController growthController = new MaidGrowthController(this, growthData);
     private final MaidBehaviorController behaviorController = new MaidBehaviorController(this);
     private final MaidTaskRuntime taskRuntime = new MaidTaskRuntime(
             this,
@@ -108,6 +118,12 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             taskRuntime,
             gameplayConfig
     );
+    private final MaidCombatController combatController = new MaidCombatController(
+            this,
+            behaviorController,
+            lifeController
+    );
+    private final MaidWorkController workController = new MaidWorkController(this, lifeController);
     private final MaidPickupController pickupController = new MaidPickupController(
             this,
             lifeController,
@@ -115,7 +131,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             gameplayConfig
     );
     private final List<ItemStack> pendingMigrationDrops = new ArrayList<>();
-    private long lastFoodAffectionGameTime = Long.MIN_VALUE;
+    private int appliedGrowthLevel = -1;
     private boolean ownershipRegistered;
 
     public AiPartnerEntity(EntityType<? extends AiPartnerEntity> entityType, Level level) {
@@ -130,15 +146,19 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         return Mob.createMobAttributes()
                 .add(Attributes.MAX_HEALTH, 20.0)
                 .add(Attributes.MOVEMENT_SPEED, 0.30)
+                .add(Attributes.ATTACK_DAMAGE, 4.0)
+                .add(Attributes.FOLLOW_RANGE, 24.0)
                 .add(Attributes.KNOCKBACK_RESISTANCE, 0.1);
     }
 
     @Override
     protected void registerGoals() {
         goalSelector.addGoal(0, new FloatGoal(this));
-        goalSelector.addGoal(1, new AiPartnerFollowOwnerGoal(this, 1.05, 5.0F, 3.0F));
-        goalSelector.addGoal(2, new OpenDoorGoal(this, true));
-        goalSelector.addGoal(3, new AiPartnerReturnToActivityGoal(this, 0.9));
+        goalSelector.addGoal(1, new AiPartnerRangedCombatGoal(this));
+        goalSelector.addGoal(2, new AiPartnerMeleeCombatGoal(this));
+        goalSelector.addGoal(3, new AiPartnerFollowOwnerGoal(this, 1.05, 5.0F, 3.0F));
+        goalSelector.addGoal(4, new OpenDoorGoal(this, true));
+        goalSelector.addGoal(5, new AiPartnerReturnToActivityGoal(this, 0.9));
         goalSelector.addGoal(6, new AiPartnerIdleWanderGoal(this, 0.65));
         goalSelector.addGoal(7, new LookAtPlayerGoal(this, Player.class, 8.0F, 0.035F));
         goalSelector.addGoal(8, new RandomLookAroundGoal(this));
@@ -243,7 +263,9 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     }
 
     public boolean canUseAmbientMovement() {
-        return taskRuntime.canUseAmbientMovement() && lifeController.canUseAmbientMovement();
+        return taskRuntime.canUseAmbientMovement()
+                && lifeController.canUseAmbientMovement()
+                && (workController.mode() == MaidWorkMode.NONE || !lifeController.canPerformScheduledWork());
     }
 
     public boolean isInventoryMenuOpen() {
@@ -315,6 +337,47 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
 
     public Optional<ActivityLocation> getActivityLocation(ActivityLocationType type) {
         return lifeController.location(type);
+    }
+
+    public MaidWorkMode getWorkMode() {
+        return workController.mode();
+    }
+
+    public void setWorkMode(MaidWorkMode mode) {
+        workController.setMode(mode);
+    }
+
+    public void cycleWorkMode() {
+        workController.cycleMode();
+    }
+
+    public String getWorkExecutionState() {
+        return workController.executionState();
+    }
+
+    public CombatPolicy getCombatPolicy() {
+        return combatController.policy();
+    }
+
+    public void setCombatPolicy(CombatPolicy policy) {
+        combatController.setPolicy(policy);
+    }
+
+    public void cycleCombatPolicy() {
+        combatController.cyclePolicy();
+    }
+
+    public boolean shouldUseRangedCombat() {
+        return combatController.shouldUseRangedCombat();
+    }
+
+    public boolean shouldUseMeleeCombat() {
+        return combatController.shouldUseMeleeCombat();
+    }
+
+    @Override
+    public void performRangedAttack(net.minecraft.world.entity.LivingEntity target, float power) {
+        combatController.performRangedAttack(target, power);
     }
 
     /**
@@ -456,16 +519,21 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             }
         }
         behaviorController.setInventoryMenuOpen(false);
+        workController.setMode(MaidWorkMode.NONE);
+        combatController.setPolicy(CombatPolicy.OFF);
         setHealth(getMaxHealth());
     }
 
     @Override
     public void tick() {
         super.tick();
+        combatController.tick();
         taskRuntime.tick();
         lifeController.tick();
+        workController.tick();
         pickupController.tick();
         if (!level().isClientSide()) {
+            applyGrowthAttributes();
             if (!ownershipRegistered && getOwnerReference() != null) {
                 PartnerService.registerLoaded(this);
                 ownershipRegistered = true;
@@ -588,8 +656,19 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     public void die(DamageSource source) {
         if (!level().isClientSide()) {
             taskRuntime.fail(FailureCode.PARTNER_DIED);
+            workController.shutdown();
         }
         super.die(source);
+    }
+
+    /** 合法击杀通过原版死亡回调发放有每日上限的成长和好感奖励。 */
+    @Override
+    public boolean killedEntity(ServerLevel level, net.minecraft.world.entity.LivingEntity entity, DamageSource source) {
+        boolean handled = super.killedEntity(level, entity, source);
+        if (handled && entity != this) {
+            growthController.rewardCombatKill();
+        }
+        return handled;
     }
 
     @Override
@@ -605,6 +684,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     public void onRemoval(RemovalReason reason) {
         super.onRemoval(reason);
         if (!level().isClientSide() && reason.shouldDestroy()) {
+            workController.shutdown();
             PartnerService.unregisterDestroyed(this);
         }
     }
@@ -643,8 +723,10 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         MaidInventoryPersistence.save(inventory, output);
         taskRuntime.save(output);
         lifeController.save(output);
+        workController.save(output);
+        combatController.save(output);
         growthData.save(output);
-        output.putLong("LastFoodAffectionGameTime", lastFoodAffectionGameTime);
+        growthController.save(output);
         if (!getSkinHash().isEmpty()) {
             output.putString("MaidSkinHash", getSkinHash());
         }
@@ -665,8 +747,11 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         pendingMigrationDrops.addAll(inventoryLoad.overflow());
         taskRuntime.load(input);
         lifeController.load(input);
+        workController.load(input);
+        combatController.load(input);
         growthData.load(input);
-        lastFoodAffectionGameTime = input.getLongOr("LastFoodAffectionGameTime", Long.MIN_VALUE);
+        growthController.load(input);
+        appliedGrowthLevel = -1;
         setSkinHash(input.getStringOr("MaidSkinHash", ""));
         ownershipRegistered = false;
     }
@@ -687,13 +772,36 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
      * 食物好感度受服务端冷却限制，防止堆叠食物瞬间刷满关系值。
      */
     public void rewardFoodAffection(int amount, int cooldownTicks) {
-        long gameTime = level().getGameTime();
-        if (amount > 0
-                && (lastFoodAffectionGameTime == Long.MIN_VALUE
-                || gameTime - lastFoodAffectionGameTime >= cooldownTicks)) {
-            growthData.addAffection(amount);
-            lastFoodAffectionGameTime = gameTime;
+        growthController.rewardFood(amount, cooldownTicks);
+    }
+
+    /** 工作控制器只报告一次已完成动作，奖励冷却和每日上限由成长层统一处理。 */
+    public void rewardWorkCompletion(MaidWorkMode mode) {
+        growthController.rewardWork(mode);
+    }
+
+    public int adjustWorkCooldown(int baseTicks) {
+        return MaidGrowthProgression.adjustCooldown(baseTicks, getGrowthLevel());
+    }
+
+    public int getWorkPathRetryLimit(int baseRetries) {
+        return baseRetries + MaidGrowthProgression.effectsForLevel(getGrowthLevel()).extraPathRetries();
+    }
+
+    /** 把当前成长等级投影到原版实体属性；成长永远不作为工作解锁条件。 */
+    private void applyGrowthAttributes() {
+        int level = getGrowthLevel();
+        if (appliedGrowthLevel == level) {
+            return;
         }
+        MaidGrowthProgression.Effects effects = MaidGrowthProgression.effectsForLevel(level);
+        java.util.Objects.requireNonNull(getAttribute(Attributes.MAX_HEALTH)).setBaseValue(effects.maxHealth());
+        java.util.Objects.requireNonNull(getAttribute(Attributes.ATTACK_DAMAGE)).setBaseValue(effects.attackDamage());
+        java.util.Objects.requireNonNull(getAttribute(Attributes.MOVEMENT_SPEED)).setBaseValue(effects.movementSpeed());
+        if (getHealth() > getMaxHealth()) {
+            setHealth(getMaxHealth());
+        }
+        appliedGrowthLevel = level;
     }
 
     /**

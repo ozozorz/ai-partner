@@ -12,19 +12,26 @@ import net.minecraft.world.level.storage.ValueOutput;
 /**
  * 把现有单箱存放状态机接入统一 MaidTask 生命周期。
  */
-public final class DepositItemMaidTask implements MaidTask {
+public class DepositItemMaidTask implements MaidTask {
     public static final String ID = "deposit_item";
     private static final String MOVED_COUNT = "movedCount";
 
     private final DepositItemExecutor executor;
+    private final String taskId;
 
     public DepositItemMaidTask(AiPartnerEntity partner) {
+        this(partner, ID);
+    }
+
+    /** 允许通用物流用独立稳定 ID 复用同一个安全存箱执行器。 */
+    protected DepositItemMaidTask(AiPartnerEntity partner, String taskId) {
         executor = new DepositItemExecutor(partner);
+        this.taskId = taskId;
     }
 
     @Override
     public String id() {
-        return ID;
+        return taskId;
     }
 
     @Override

@@ -14,7 +14,8 @@ public enum PartnerMode {
     RETURNING_HOME,
     WORKING,
     RELAXING,
-    SLEEPING;
+    SLEEPING,
+    FIGHTING;
 
     /**
      * 从持久化文本中安全恢复模式。

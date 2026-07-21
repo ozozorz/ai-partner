@@ -3,7 +3,10 @@
   "package": "io.github.ozozorz.aipartner.mixin",
   "compatibilityLevel": "JAVA_25",
   "mixins": [
-    "ExperienceOrbAccessor"
+    "AbstractFurnaceBlockEntityAccessor",
+    "ExperienceOrbAccessor",
+    "FishingHookAccessor",
+    "FishingHookMixin"
   ],
   "injectors": {
     "defaultRequire": 1

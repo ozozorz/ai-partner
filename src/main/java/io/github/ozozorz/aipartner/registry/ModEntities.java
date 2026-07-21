@@ -2,6 +2,7 @@ package io.github.ozozorz.aipartner.registry;
 
 import io.github.ozozorz.aipartner.AiPartnerMod;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
+import io.github.ozozorz.aipartner.entity.MaidFishingHookEntity;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -15,6 +16,7 @@ import net.minecraft.world.entity.MobCategory;
  */
 public final class ModEntities {
     public static final EntityType<AiPartnerEntity> AI_PARTNER = registerEntityType();
+    public static final EntityType<MaidFishingHookEntity> MAID_FISHING_HOOK = registerFishingHookType();
 
     private ModEntities() {
     }
@@ -37,5 +39,20 @@ public final class ModEntities {
                 .build(key);
         return Registry.register(BuiltInRegistries.ENTITY_TYPE, key, type);
     }
-}
 
+    /** 注册不保存到区块、仅在钓鱼工作期间存在的女仆浮标。 */
+    private static EntityType<MaidFishingHookEntity> registerFishingHookType() {
+        ResourceKey<EntityType<?>> key = ResourceKey.create(
+                Registries.ENTITY_TYPE,
+                AiPartnerMod.id("maid_fishing_hook")
+        );
+        EntityType<MaidFishingHookEntity> type = EntityType.Builder
+                .<MaidFishingHookEntity>of(MaidFishingHookEntity::new, MobCategory.MISC)
+                .noLootTable()
+                .sized(0.25F, 0.25F)
+                .clientTrackingRange(4)
+                .updateInterval(5)
+                .build(key);
+        return Registry.register(BuiltInRegistries.ENTITY_TYPE, key, type);
+    }
+}

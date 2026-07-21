@@ -11,6 +11,7 @@ public final class MaidGrowthData {
 
     private int affection;
     private int experience;
+    private long completedWorkMask;
 
     public int affection() {
         return affection;
@@ -21,7 +22,7 @@ public final class MaidGrowthData {
     }
 
     public int level() {
-        return 1 + (int) Math.sqrt(experience / 25.0);
+        return MaidGrowthProgression.levelForExperience(experience);
     }
 
     public int addAffection(int amount) {
@@ -36,13 +37,30 @@ public final class MaidGrowthData {
         return experience;
     }
 
+    /** 首次完成某一工作模式时返回 true，用于一次性成长奖励。 */
+    public boolean markFirstWorkCompletion(int workOrdinal) {
+        if (workOrdinal < 0 || workOrdinal >= Long.SIZE) {
+            return false;
+        }
+        long bit = 1L << workOrdinal;
+        boolean first = (completedWorkMask & bit) == 0L;
+        completedWorkMask |= bit;
+        return first;
+    }
+
+    public long completedWorkMask() {
+        return completedWorkMask;
+    }
+
     public void save(ValueOutput output) {
         output.putInt("MaidAffection", affection);
         output.putInt("MaidGrowthExperience", experience);
+        output.putLong("MaidCompletedWorkMask", completedWorkMask);
     }
 
     public void load(ValueInput input) {
         affection = Math.clamp(input.getIntOr("MaidAffection", 0), 0, MAX_AFFECTION);
         experience = Math.max(0, input.getIntOr("MaidGrowthExperience", 0));
+        completedWorkMask = input.getLongOr("MaidCompletedWorkMask", 0L);
     }
 }

@@ -9,6 +9,6 @@ public enum JobType {
     COLLECT_BLOCK,
     DEPOSIT_ITEM,
     COLLECT_AND_DEPOSIT,
-    CANCEL
+    CANCEL,
+    TRANSFER_ITEM
 }
-
