@@ -37,10 +37,8 @@ public record MaidWorkflowSpec(
         for (int index = 0; index < steps.size(); index++) {
             MaidControlIntent step = Objects.requireNonNull(steps.get(index), "workflow step");
             MaidActionRegistry.contractFor(step);
-            if (index < steps.size() - 1
-                    && step instanceof MaidControlIntent.RunTask runTask
-                    && (runTask.job().type() == JobType.FOLLOW || runTask.job().type() == JobType.STAY)) {
-                throw new IllegalArgumentException("Persistent FOLLOW/STAY must be the final workflow step");
+            if (index < steps.size() - 1 && isPersistentDirective(step)) {
+                throw new IllegalArgumentException("Persistent movement directives must be the final workflow step");
             }
         }
     }
@@ -81,5 +79,14 @@ public record MaidWorkflowSpec(
     private static String bounded(String value, int maximumLength) {
         String normalized = Objects.requireNonNullElse(value, "").strip();
         return normalized.length() <= maximumLength ? normalized : normalized.substring(0, maximumLength);
+    }
+
+    /** Identifies directives whose ongoing movement would be cancelled by a later plan step. */
+    private static boolean isPersistentDirective(MaidControlIntent step) {
+        if (step instanceof MaidControlIntent.ReturnHome) {
+            return true;
+        }
+        return step instanceof MaidControlIntent.RunTask runTask
+                && (runTask.job().type() == JobType.FOLLOW || runTask.job().type() == JobType.STAY);
     }
 }

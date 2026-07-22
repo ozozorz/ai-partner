@@ -28,7 +28,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Asynchronous OpenAI-compatible gateway for gameplay control. API key values
- * are read at request time from the selected environment variable and never logged.
+ * are read at request time from the server-configured environment variable and never logged.
  */
 public final class MaidControlLlmGateway {
     private static final MaidControlLlmGateway INSTANCE = new MaidControlLlmGateway(AiPartnerConfig.get());
@@ -77,26 +77,6 @@ public final class MaidControlLlmGateway {
         return AiPartnerConfig.hasEnvironmentVariable(apiKeyEnvironmentVariable)
                 ? null
                 : "MISSING_API_KEY_ENV";
-    }
-
-    public boolean isReady(String apiKeyEnvironmentVariable) {
-        return readinessError(apiKeyEnvironmentVariable) == null;
-    }
-
-    /** Sends one bounded interpretation request off the server tick thread. */
-    public CompletableFuture<MaidControlLlmResult> interpret(
-            String playerMessage,
-            MaidControlContextSnapshot context,
-            String apiKeyEnvironmentVariable
-    ) {
-        return request(
-                MaidLlmRequestKind.PLAYER_MESSAGE,
-                playerMessage,
-                context,
-                List.of(),
-                null,
-                apiKeyEnvironmentVariable
-        );
     }
 
     /**

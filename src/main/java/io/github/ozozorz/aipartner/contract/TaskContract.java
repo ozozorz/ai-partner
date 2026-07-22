@@ -92,29 +92,7 @@ public final class TaskContract {
         );
     }
 
-    /**
-     * 从实体存档恢复上次契约，防止服务器重启后语言状态与行为模式失配。
-     */
-    public static TaskContract restored(
-            UUID contractId,
-            JobSpec job,
-            long acceptedAtEpochMillis,
-            ContractStatus status,
-            FailureCode failureCode
-    ) {
-        return restored(
-                contractId,
-                job,
-                acceptedAtEpochMillis,
-                status,
-                failureCode,
-                FailurePolicy.DEFAULT
-        );
-    }
-
-    /**
-     * 从 v0.5 存档恢复包含执行边界的契约。
-     */
+    /** 从早期存档恢复缺少完整谓词和执行锚点的契约。 */
     public static TaskContract restored(
             UUID contractId,
             JobSpec job,
@@ -290,14 +268,12 @@ public final class TaskContract {
         return failureCode;
     }
 
-    /**
-     * 契约的有限重试、重规划与超时策略。
-     */
-    public record FailurePolicy(int maxLocalRetries, int maxLlmReplans, int timeoutSeconds) {
-        public static final FailurePolicy DEFAULT = new FailurePolicy(2, 1, 90);
+    /** 契约执行器的有限本地重试与超时边界；工作流重规划由 MaidWorkflowRuntime 独立管理。 */
+    public record FailurePolicy(int maxLocalRetries, int timeoutSeconds) {
+        public static final FailurePolicy DEFAULT = new FailurePolicy(2, 90);
 
         public FailurePolicy {
-            if (maxLocalRetries < 0 || maxLlmReplans < 0 || timeoutSeconds <= 0) {
+            if (maxLocalRetries < 0 || timeoutSeconds <= 0) {
                 throw new IllegalArgumentException("Failure policy values are out of range");
             }
         }

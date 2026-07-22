@@ -1,11 +1,10 @@
 package io.github.ozozorz.aipartner.contract;
 
 /**
- * 把验证与运行时故障归一化，便于实验统计和一致性回复。
+ * 把验证与运行时故障归一化，便于一致性回复和故障诊断。
  */
 public enum FailureCode {
     NONE,
-    PARTNER_NOT_FOUND,
     PARTNER_DIED,
     OWNER_OFFLINE,
     DIFFERENT_DIMENSION,

@@ -53,16 +53,6 @@ public final class MaidCombatController {
         }
     }
 
-    public void cyclePolicy() {
-        setPolicy(policy.next());
-    }
-
-    public boolean isEngaged() {
-        return behaviorController.isTemporarilyInterrupted()
-                && partner.getTarget() != null
-                && partner.getTarget().isAlive();
-    }
-
     /**
      * 每 tick 仅从受伤记忆和主人战斗记忆中选择目标，不主动扫描中立生物。
      */

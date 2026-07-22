@@ -7,8 +7,6 @@ import io.github.ozozorz.aipartner.contract.FailureCode;
 import io.github.ozozorz.aipartner.contract.JobSpec;
 import io.github.ozozorz.aipartner.contract.TaskContract;
 import io.github.ozozorz.aipartner.core.behavior.ManualDirective;
-import io.github.ozozorz.aipartner.core.order.MaidOrderService;
-import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.job.JobType;
 import java.util.List;
@@ -109,15 +107,7 @@ public final class MaidActionRegistry {
         if (intent instanceof MaidControlIntent.RunTask runTask) {
             preparedTask = ContractCompiler.compile(partner, actor, runTask.job());
             if (!preparedTask.accepted()) {
-                ContractDecision audited = MaidOrderService.submitValidated(
-                        partner,
-                        actor,
-                        runTask.job(),
-                        request.rawInstruction(),
-                        preparedTask,
-                        TaskExecutionPolicy.standard(request.sourceId())
-                );
-                return rejectedTaskDecision(audited);
+                return rejectedTaskDecision(preparedTask);
             }
         }
 
@@ -294,18 +284,16 @@ public final class MaidActionRegistry {
             MaidActionRequest request,
             ContractDecision preparedDecision
     ) {
-        ContractDecision decision = MaidOrderService.submitValidated(
-                partner,
-                actor,
-                job,
-                request.rawInstruction(),
-                preparedDecision,
-                TaskExecutionPolicy.standard(request.sourceId())
-        );
-        if (!decision.accepted() || decision.contract() == null) {
-            return rejectedTaskDecision(decision);
+        if (!preparedDecision.accepted() || preparedDecision.contract() == null) {
+            return rejectedTaskDecision(preparedDecision);
         }
-        TaskContract contract = decision.contract();
+        TaskContract contract = preparedDecision.contract();
+        partner.applyValidatedContract(
+                contract,
+                actor,
+                request.rawInstruction(),
+                request.sourceId()
+        );
         Component message = Component.translatable(responseKey(job.type()));
         String evidence = "task_contract=" + contract.contractId() + ",status=" + contract.status().name();
         if (contract.status() == io.github.ozozorz.aipartner.contract.ContractStatus.FAILED

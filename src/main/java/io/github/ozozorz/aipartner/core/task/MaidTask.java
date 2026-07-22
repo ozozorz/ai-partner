@@ -3,7 +3,6 @@ package io.github.ozozorz.aipartner.core.task;
 import io.github.ozozorz.aipartner.entity.PartnerMode;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.storage.ValueInput;
-import net.minecraft.world.level.storage.ValueOutput;
 
 /**
  * 所有有界女仆工作的统一生命周期。
@@ -36,17 +35,9 @@ public interface MaidTask {
 
     MaidTaskSnapshot snapshot();
 
-    /**
-     * v0.4 任务可覆盖此方法，把旧字段迁移成统一快照。
-     */
+    /** Reads a legacy snapshot so existing worlds can migrate to the current task format. */
     default MaidTaskSnapshot readLegacySnapshot(ValueInput input) {
         return MaidTaskSnapshot.empty();
-    }
-
-    /**
-     * v0.5 过渡期继续写旧字段，便于现有研究工具读取。
-     */
-    default void writeLegacySnapshot(ValueOutput output, MaidTaskSnapshot snapshot) {
     }
 
     /**

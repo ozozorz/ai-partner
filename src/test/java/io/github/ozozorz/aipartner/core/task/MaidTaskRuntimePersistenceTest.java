@@ -41,7 +41,7 @@ class MaidTaskRuntimePersistenceTest {
                 List.of("owner_is_online", "inventory_has_capacity(8)"),
                 List.of("maid_inventory_delta(minecraft:oak_log) >= 8"),
                 List.of("only_break_target_block", "distance_from_origin <= 16"),
-                new TaskContract.FailurePolicy(3, 0, 120),
+                new TaskContract.FailurePolicy(3, 120),
                 TaskContract.ExecutionAnchor.bound(
                         java.util.UUID.randomUUID(),
                         "minecraft:overworld",

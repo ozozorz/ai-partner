@@ -1,37 +1,42 @@
 # AI Partner
 
-AI Partner 是一个面向 Minecraft Java Edition 26.1.2 的 Fabric 模组原型。它使用“指令—行为契约（Instruction–Behavior Contract, IBC）”把玩家指令转换为受约束、可验证的伙伴行为。
+AI Partner 是面向 Minecraft Java Edition 26.1.2 的 Fabric 女仆伙伴模组。项目用“指令—行为契约”（Instruction–Behavior Contract, IBC）把命令、GUI、本地自然语言和 LLM 计划统一成服务端可验证的语义动作；模型只负责理解与规划，不直接控制移动、攻击、方块、容器或 NBT。
 
-当前开发版本已经从 v0.10“单意图双驱动”推进到“连续角色对话 + 有界语义工作流”。v0.4 实验代码仍用于兼容旧产物，但不再约束当前玩法或后续论文实验；新的 v3 协议可以一边自然回应，一边提出最多 6 个按真实结果串行推进的既有能力。基础模组已经具备：
+仓库元数据版本为 `0.10.0`，当前自然语言协议为 `3.0`。
 
-- 自定义 AI 女仆实体，默认复用 Minecraft 官方 Alex 瘦臂模型，并支持上传 64×64 PNG 皮肤；
-- 持久化主人索引、可配置数量上限，以及多女仆列表和当前女仆选择；
-- 36 格物品布局（原生主手 + 35 格储物）、四格护甲、副手、安全工具租约，以及菜单内真实可用的 2×2 制作区；
-- 任意原版可食用食物、通用物品/箭/经验拾取、装备经验修补；
-- 日班、夜班、全天工作，以及独立工作/休闲/睡眠地点、活动半径和回家约束；
-- 17 种持续工作模式：13 种基础农务/照料/环境工作，以及保守整树砍伐、安全暴露矿石采集、原版熔炉烧炼和真实浮标钓鱼；
-- `OFF`、`SELF_DEFENSE`、`DEFEND_OWNER` 三种防御策略，按距离自动选择真实近战或弓箭，并在战斗结束后恢复被暂停的有限任务/持续工作；
-- 有界的“搜索—导航—复验—动作—冷却”工作状态机，以及独立的“2×2 制作—搜索工作台—制作/放置工作台—3×3 制作”物资准备状态机；工作统一受 WORK 日程、工作地点、活动半径、工具和背包约束，会修改世界的规则另外受 `mobGriefing` 约束；
-- 不传送的回家导航、床上睡眠、无床休息、受伤唤醒和睡眠恢复；
-- 名称、带奖励限额的好感/成长曲线、温和属性与工作效率增益、内置声音反馈和短时聊天气泡；
-- GUI 同步显示生命、模式、任务、契约、日程、地点、半径、好感和成长，并提供分页的全部具体工作按钮；
-- 服务端原版配方规划与原子制作：女仆可递归制作中间材料、处理容器剩余物，并为斧、镐、锹、剪刀、桶、瓶、火把和钓竿等工作物资自动补给；
-- `FOLLOW`、`STAY`、`COLLECT_BLOCK`、`DEPOSIT_ITEM`、`TRANSFER_ITEM`、`COLLECT_AND_DEPOSIT`、`CANCEL` 显式状态机；
-- `FOLLOW`、`STAY` 已从有限工作中拆分为长期手动指令，`CANCEL` 由统一订单服务执行；
-- 通用 `MaidTaskRuntime`、任务/验证器注册表和版本化任务快照；
-- R 键专用对话框，以及每个女仆独立持久化的本地离线/LLM 驱动开关；多女仆可使用 `@女仆名称` 前缀临时指定；
-- API Key 仅通过环境变量间接读取：UI、命令、网络和存档只接受环境变量名，不接收或保存密钥值；
-- 命令、GUI、离线解析器和 LLM 最终共用服务端权威控制/订单入口；
-- 实验日志通过只读领域事件观察核心运行时，实体与 GUI 不再依赖实验包；
-- 固定“采集→存箱”两阶段编排、跨重启阶段恢复和父契约总超时；
-- `/maid <message>` 的中英文规则解析降级路径；
-- 执行前权限、维度和参数验证；
-- 有限寻路重试、类型化失败状态；
-- 带 `episode_id`、`scenario_id` 与世界种子的异步 JSONL 实验日志；
-- Rule-BT、LLM-Schema、Maid-IBC 与 A2 四种冻结系统条件；
-- 18 场景可恢复批处理，以及带限速、重试和费用上限的 72 指令固定模型评测。
+## 当前能力
 
-所有模型输出都只是候选计划。服务器会逐步执行类型、白名单、参数、权限、工具、目标、容器、持久化原点和运行时不变量检查；对话只能依据服务器回执和任务终态宣告结果。模型不会直接控制逐 tick 移动、攻击或方块修改。当前实现细节见 [`docs/LLM_BOUNDED_WORKFLOW_ZH.md`](docs/LLM_BOUNDED_WORKFLOW_ZH.md)。
+- 可绑定的 AI 女仆实体、多女仆索引与当前目标选择；
+- 原生主手、35 格储物、四格护甲、副手及安全工具租用；
+- 2×2 / 3×3 原版配方制作、工作物资递归准备与工作台搜索/放置；
+- 日班、夜班、全天日程，以及独立工作、休闲、睡眠地点和活动半径；
+- 17 种持续工作：种植、甘蔗、瓜类、可可、采集、除雪、养蜂、剪毛、挤奶、照料主人、繁殖、插火把、灭火、伐木、采矿、熔炼、钓鱼；
+- `OFF`、`SELF_DEFENSE`、`DEFEND_OWNER` 三种战斗策略，真实近战/弓箭切换及任务暂停恢复；
+- `FOLLOW`、`STAY`、`COLLECT_BLOCK`、`DEPOSIT_ITEM`、`TRANSFER_ITEM`、`COLLECT_AND_DEPOSIT`、`CANCEL` 类型化任务；
+- 回家导航、床上睡眠、无床休息、喂食、通用拾取、经验修补、好感与成长；
+- 64×64 PNG 自定义皮肤、声音、聊天气泡和服务端权威 GUI；
+- 每个女仆独立持久化的 `LOCAL` / `LLM` 驱动、连续对话记忆和最多 6 步的有界语义工作流。
+
+行为优先级为：GUI 暂停 > 合法战斗中断 > 有限任务 > 手动指令 > 日程工作/生活 > 空闲行为。只有跟随主人可在长距离卡住后使用原版安全瞬移；战斗、回家、工作、休闲和睡眠只寻路。
+
+## 执行边界
+
+```mermaid
+flowchart LR
+    Command["/maid 命令"] --> Registry["MaidActionRegistry"]
+    Menu["服务端 GUI 动作"] --> Registry
+    Local["LOCAL 规则解析"] --> Registry
+    LLM["LLM v3 候选计划"] --> Workflow["MaidWorkflowRuntime"]
+    Workflow --> Registry
+    Registry --> IBC["权限、参数与 IBC 校验"]
+    IBC --> Runtime["任务 / 工作 / 生活 / 战斗控制器"]
+    Runtime --> Evidence["真实回执与任务终态"]
+    Evidence --> Workflow
+```
+
+所有入口都经过主人、实体存活、维度、参数白名单和运行时不变量检查。有限任务在服务器上编译为 `TaskContract`，保存主人、维度、执行原点、目标谓词、恢复预算和超时；采集与存箱只有在实际物品增量达到目标后才能进入完成态。工作流只根据服务器回执推进，模型文本不能宣告成功。
+
+更完整的模块说明见 [架构文档](docs/ARCHITECTURE.md)，LLM 协议与工作流约束见 [LLM 有界工作流](docs/LLM_BOUNDED_WORKFLOW_ZH.md)，本轮代码审查、清理决策与剩余风险见 [全项目 Review](docs/PROJECT_REVIEW_ZH.md)。
 
 ## 开发环境
 
@@ -41,137 +46,81 @@ AI Partner 是一个面向 Minecraft Java Edition 26.1.2 的 Fabric 模组原型
 - Fabric API 0.155.2+26.1.2
 - Fabric Loom 1.17.9
 
-Windows 构建：
+Windows：
 
 ```powershell
+.\gradlew.bat test
 .\gradlew.bat build
-```
-
-启动开发客户端：
-
-```powershell
 .\gradlew.bat runClient
 ```
 
-## 游戏内命令
+`build` 会编译服务端、客户端、Mixin、资源和测试。当前测试以纯 Java/JUnit 边界测试为主；它不能替代真实世界 tick、寻路、区块加载和客户端交互验收。
+
+## 游戏内使用
+
+默认按 `R` 打开对话框。`@女仆名称 指令` 可临时指定本条消息的目标，不改变 `/maid select` 的长期选择。潜行右键女仆打开背包与生活/工作界面；普通右键可喂食或穿戴手持护甲。
+
+主要命令：
 
 ```text
 /maid spawn
 /maid list
 /maid select <UUID前缀或唯一名称>
-/maid follow
-/maid stay
-/maid home
-/maid cancel
+/maid follow | stay | home | cancel
 /maid name <名称>
 /maid schedule day|night|all-day
 /maid location set|clear work|leisure|sleep
 /maid home-bound <true|false>
 /maid radius <1..服务器上限>
-/maid work <none|farmer|sugar-cane|melon|cocoa|forager|snow-clearer|beekeeper|shearer|milker|caregiver|breeder|torch-bearer|firefighter|lumberjack|miner|smelter|fisher>
-/maid combat <off|self-defense|defend-owner>
+/maid work <工作模式>
+/maid combat off|self-defense|defend-owner
+/maid status | inventory | retrieve
 /maid driver
-/maid driver mode <local|llm>
-/maid driver api-key-env <环境变量名>
-/maid status
-/maid inventory
-/maid retrieve
-/maid 跟着我
-/maid collect minecraft:oak_log 8 16
-/maid 收集 8 块橡木原木
-/maid deposit minecraft:oak_log 8 16
-/maid 把 8 个橡木原木放进箱子
-/maid transfer minecraft:amethyst_shard 3 8
-/maid collect-and-deposit minecraft:oak_log 8 16
-/maid 砍 8 个橡木原木然后放进箱子
+/maid driver mode local|llm
+/maid driver clear-memory
+/maid collect <方块ID> [数量] [半径]
+/maid deposit <物品ID> [数量] [半径]
+/maid transfer <物品ID> [数量] [半径]
+/maid collect-and-deposit <方块ID> [数量] [半径]
+/maid <自然语言消息>
 /maid-skin upload <本地64×64 PNG路径>
 /maid-skin clear
 ```
 
-默认按 `R` 打开自然语言对话框。对话框会显示当前目标女仆、驱动方式、模型就绪状态和 API Key 环境变量名；发送 `@小雪 去砍树` 可临时把本条指令交给名为“小雪”的女仆，不改变 `/maid select` 的长期选择。直接命令和原 GUI 按钮继续作为确定性的管理/调试入口，但自然语言入口由所选 `local` 或 `llm` 驱动解释。
+`/maid-skin` 是客户端命令；图片在客户端预检后仍会由服务器重新验证并重编码。工作模式的完整名称可在 GUI 中选择，也可查看 `MaidWorkMode` 的序列化名称。
 
-潜行右键 AI 女仆可打开背包与生活/工作配置界面。物品区首格是真实主手，其余 35 格为储物；右侧 2×2 制作区使用原版配方，生活/日程页可切换为三页具体工作列表并直接选择全部 17 种工作或 `NONE`。工作模式与防御策略仍可在界面左下角循环切换。任务或工作需要的工具会安全借到主手，并按原版规则消耗耐久。普通右键可喂食或把手持护甲穿到对应护甲栏，被替换的旧护甲会安全归还玩家。
+## 配置
 
-`/maid-skin` 是客户端命令：本地文件先在客户端预检，再发送给服务器重新校验、剥离元数据和编码。当前自定义皮肤统一使用 Alex 瘦臂模型，不提供宽臂/瘦臂自动识别。
+生活玩法配置首次启动后生成于 `config/ai-partner-gameplay.json`，无密钥示例见 [config/ai-partner-gameplay.example.json](config/ai-partner-gameplay.example.json)。它控制女仆数量、活动半径、日程边界、睡眠恢复、好感冷却、拾取、声音和聊天气泡。
 
-## 生活玩法配置
+LLM 配置生成于 `config/ai-partner.json`，示例见 [config/ai-partner.example.json](config/ai-partner.example.json)。默认端点为 OpenAI-compatible Chat Completions 接口；API Key 只通过所配置的环境变量读取，密钥值不会进入 UI、网络包、配置、存档或日志。
 
-首次启动会生成 `.minecraft/config/ai-partner-gameplay.json`；开发环境对应 `run/config/ai-partner-gameplay.json`，仓库示例见 [`config/ai-partner-gameplay.example.json`](config/ai-partner-gameplay.example.json)。默认值包括每位主人最多 1 名女仆、活动半径 8（最大 32）、日落/夜晚/黎明边界、睡眠恢复、喂食好感冷却，以及物品拾取、经验拾取、内置声音和聊天气泡开关。
+每个新女仆默认使用 `LOCAL`，主人可以逐女仆切换驱动模式；端点、模型和 API Key 环境变量名只能由服务器管理员在全局配置中设置。切换到 `LLM` 后：
 
-行为优先级固定为：打开 GUI 暂停 > 合法防御战斗中断 > 有限任务 > 跟随/待命/回家指令 > 当前日程工作/生活 > 空闲漫步。战斗只暂停而不销毁原任务；结束后会重新验证目标并继续。只有跟随主人允许在长距离卡住后使用原版安全瞬移；战斗、回家、工作、休闲和睡眠只会寻路。
+每个女仆只保留最近 12 条、每条最多 512 字符的连续对话；主人可用 `/maid driver clear-memory` 清空当前女仆的记忆，同时取消仍在途的旧模型响应。
 
-持续工作只在当前日程为 `WORK` 且女仆位于工作地点半径内运行。规则缺少可制作物资时，女仆先尝试个人 2×2 制作；需要 3×3 时会搜索工作区内已加载的工作台，没有工作台则尝试制作并安全放置一个，再导航过去制作。砍树在无法取得或制作斧头时允许徒手降级，并使用更长动作冷却；挖矿仍必须取得满足矿石等级的镐。砍树先批准整棵自然树计划并拒绝邻接木制结构；挖矿只处理有安全站位、已暴露且相邻无岩浆的原版矿石；熔炼租用空的原版熔炉并对输入、燃料和产物做守恒复验；钓鱼使用真实浮标、咬钩计时和原版战利品。蜂蜜模式为避免伪造无玩家来源的蜂群仇恨，只处理下方有点燃营火烟雾保护的成熟蜂巢；喂主人默认排除腐肉、蜘蛛眼、毒马铃薯、河豚和生鸡肉。
+1. 端点未启用或密钥环境变量缺失时，能被本地规则明确识别的单意图会安全降级到本地执行；其余请求会拒绝；
+2. 已发出的 HTTP 请求若网络失败、超时或返回非法协议，不会再偷偷执行另一项动作；
+3. 紧急取消始终保留本地通道；
+4. 模型只能返回严格协议中的对话行为与白名单动作，不能提交命令、坐标、NBT 或任意代码。
 
-`/maid transfer <item> <quantity> [radius]` 是通用单箱物流任务：服务端验证物品、数量、主人权限、箱子可访问性和容量后，只移动请求的精确数量。成长经验来自经验球、持续工作和合法战斗；所有工作从 1 级起即可使用，等级只提供生命、攻击、移动、工作冷却和寻路重试的温和增益。
+## 世界行为与安全限制
 
-实验事件写入运行目录的 `logs/ai-partner/episodes.jsonl`。
+- 持续工作只在日程处于 `WORK` 且满足活动地点、半径、区块、工具和背包条件时运行；
+- 会修改世界的动作遵守 `mobGriefing`；熔炉和钓鱼等不依赖破坏方块的规则可独立运行；
+- 伐木先识别自然树并排除邻接木制结构；采矿只处理有安全站位、暴露且无邻接岩浆的受支持矿石；
+- 熔炼复验熔炉租约、配方和物品守恒；钓鱼使用真实浮标和原版战利品；
+- 通用物流只向可访问且容量足够的普通单箱移动请求的精确数量；
+- 外部变更命令或 GUI 操作会中断活动工作流，避免旧计划稍后继续修改状态；只读查询不会中断。
 
-## 可重复实验
+## 持久化与兼容
 
-实验命令会修改世界，因此只对游戏管理员开放。`reset` 首次在玩家东侧创建一个 21×8×21 的有界测试区；同一会话后续重置复用该锚点，只清除测试区内的方块和掉落物，不触碰区域外世界。女仆原有背包和装备会先归还玩家，玩家背包放不下时由原版逻辑掉落在玩家附近。
+当前写入格式只保存玩法运行所需状态：实体控制器、背包与装备、任务契约和快照、工作流游标与证据、生活/工作/战斗/成长状态、皮肤哈希及驱动设置。
 
-```text
-/maid experiment list
-/maid experiment reset composite_normal
-/maid 砍 8 个橡木原木然后放进箱子
-/maid experiment context
-/maid experiment disturb
-/maid experiment clear
-/maid experiment batch pretest pretest-v04
-/maid experiment batch resume pretest-v04
-/maid experiment offline start 72 5.0 offline-v04-main
-/maid experiment freeze pretest-v04
-/maid experiment batch main 3 main-v04-162
-/maid experiment batch variant MAID_IBC_A2_NO_RUNTIME_MONITORING 3 a2-v04-54
-```
+代码仍保留少量只读迁移路径，用于旧世界中的压缩背包、混合行为模式、早期任务快照和旧工作流格式。这些兼容字段不会再由新存档写出，也不会重新启用旧实验变体或关闭现行安全检查。
 
-场景表冻结为 18 项，覆盖正常采集/存放/组合任务、缺目标、缺工具、背包满、不可达、缺物品、无箱子、箱子满、取消、参数边界以及目标/箱子运行中消失。只有带预设扰动的三个场景能执行 `disturb`。
+## 当前验证重点
 
-以下命令会把 72 条平衡中文金标数据、Rule-BT 逐条预测和按类别汇总指标导出到 `logs/ai-partner/evaluation/`：
+自动测试覆盖协议 Schema/codec 对齐、全部语义动作注册、计划边界、重规划目标保持、契约生命周期与持久化、恢复/超时预算、命令参数、背包迁移、制作、复杂工作规则、成长、皮肤和端点策略。
 
-```text
-/maid experiment export-evaluation
-```
-
-数据集版本和 SHA-256 会写入指标文件；每个类别固定 12 条，并在调参前冻结为 6 条 `dev` 与 6 条 `test`。
-
-v0.4 的批处理会自动重置、运行和独立判定场景，并在 `logs/ai-partner/batches/<batch_id>/` 写入可恢复检查点、逐 episode 结果和汇总。完整预实验是 Rule-BT 18 场景各一次，加 LLM-Schema 与 Maid-IBC 各 5 个代表场景；冻结审计通过后，`main 3` 运行最低规模 162 episodes，`main 5` 运行理想规模 270 episodes。A2 消融可通过 `batch variant MAID_IBC_A2_NO_RUNTIME_MONITORING` 单独运行。
-
-固定模型离线评测支持 1–72 条、12 RPM 限速、最多 3 次重试、断点恢复和美元费用上限，自动输出 JVR、意图准确率、槽位 F1、CCR、URR、FRR。详细命令、冻结门槛与产物结构见 [`docs/EVALUATION.md`](docs/EVALUATION.md)。
-
-## LLM 配置
-
-模组第一次启动时会生成 `.minecraft/config/ai-partner.json`；开发环境对应 `run/config/ai-partner.json`。仓库内的 [`config/ai-partner.example.json`](config/ai-partner.example.json) 是不含密钥的示例。
-
-默认配置已使用 DeepSeek 的 OpenAI-compatible Chat Completions 端点、`deepseek-v4-flash` 模型和 `DEEPSEEK_API_KEY` 环境变量名。设置环境变量后需要重启启动器/游戏，让 Minecraft 或专用服务器进程继承新变量。
-
-如需改用其他 OpenAI-compatible 端点：
-
-1. 把 `llmEnabled` 改为 `true`；
-2. 填写 `endpoint` 和固定的 `model` 标识；
-3. 把 API 密钥写入环境变量；在 R 键对话框或 `/maid driver api-key-env <名称>` 中只填写该环境变量的名称；`apiKeyEnvironmentVariable` 是新女仆/旧实验入口的默认名称；本地无鉴权端点可以不设置密钥；
-4. 如果端点不支持 `response_format: {"type":"json_object"}`，将 `requestJsonResponseFormat` 改为 `false`。
-
-每个女仆默认使用 `local`。切换为 `llm` 后，R 键对话框和 `/maid <message>` 会调用模型；未启用、缺少所选环境变量、超时或输出无效时不会降级后偷偷执行，也不会启动任何新行为。紧急“取消”始终保留本地通道。模型只能返回严格 v2 高层意图，服务端仍会重新验证并使用确定性控制器执行。
-
-## 测试
-
-```powershell
-.\gradlew.bat test
-```
-
-当前 155 项单元测试覆盖规则解析、v3 Schema↔codec 差分语料、语义动作契约全覆盖、有界工作流、重规划目标保持、分阶段 LLM 响应契约、对话记忆、离线工作/日程/战斗意图、驱动设置与 `@` 前缀匹配、正式命令、任务/工作注册表、GUI、背包、复杂工作、成长、契约生命周期与完整存档往返、恢复/超时预算、LLM 端点策略，以及旧实验兼容代码。详细模块设计见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 和 [`docs/LLM_BOUNDED_WORKFLOW_ZH.md`](docs/LLM_BOUNDED_WORKFLOW_ZH.md)。
-
-## 研究结果与复现
-
-- v0.4 分析流程与统计解释见 [`analysis/README.md`](analysis/README.md)；
-- 自动生成的主实验与 A2 审计见 [`analysis/generated/analysis_report.md`](analysis/generated/analysis_report.md)；
-- 包含真实结果与讨论的论文实证初稿见 [`docs/THESIS_EMPIRICAL_DRAFT_ZH.md`](docs/THESIS_EMPIRICAL_DRAFT_ZH.md)；
-- 面向《韩国游戏学会论文学报》的当前投稿差距与证据审计见 [`docs/KCGS_V0_10_SUBMISSION_AUDIT_ZH.md`](docs/KCGS_V0_10_SUBMISSION_AUDIT_ZH.md)；
-- v0.11 分阶段研究冻结与投稿验收门见 [`docs/V0_11_RESEARCH_FREEZE_PLAN_ZH.md`](docs/V0_11_RESEARCH_FREEZE_PLAN_ZH.md)；
-- v0.4 时期的历史审计和未注册设计草案见 [`docs/KCGS_SUBMISSION_REVIEW_ZH.md`](docs/KCGS_SUBMISSION_REVIEW_ZH.md) 与 [`docs/V0_5_PREREGISTRATION_DRAFT_ZH.md`](docs/V0_5_PREREGISTRATION_DRAFT_ZH.md)；
-- 原主实验快照见 [`artifacts/experiments/v0.4-primary/`](artifacts/experiments/v0.4-primary/)，含 A2 的增量快照见 [`artifacts/experiments/v0.4-with-a2/`](artifacts/experiments/v0.4-with-a2/)。
-
-## 下一里程碑
-
-下一阶段将围绕当前 v3 对话—工作流—契约闭环重新设计论文实验，不复用 v0.4 冻结协议作为玩法限制；重点评估复杂指令拆解、逐步成功率、重规划、结果忠实度、离线兼容和持久化恢复。
+仍需通过真实 GameTest 或开发客户端持续验证的高风险区域包括：长时间寻路与区块卸载、多人同时操作、重启中断点、熔炉/工作台竞争、复杂计划的终态叙述，以及回家指令“已接收”和“已到达”之间的区别。

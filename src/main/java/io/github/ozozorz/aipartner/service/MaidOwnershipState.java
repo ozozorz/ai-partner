@@ -9,7 +9,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.datafix.DataFixTypes;
@@ -66,10 +65,6 @@ public final class MaidOwnershipState extends SavedData {
 
     public static MaidOwnershipState get(MinecraftServer server) {
         return server.getDataStorage().computeIfAbsent(TYPE);
-    }
-
-    public Set<UUID> ownedBy(UUID owner) {
-        return Set.copyOf(ownedMaids.getOrDefault(owner, new LinkedHashSet<>()));
     }
 
     public int ownedCount(UUID owner) {

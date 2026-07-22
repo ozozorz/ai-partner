@@ -6,8 +6,6 @@ import io.github.ozozorz.aipartner.contract.JobSpec;
 import io.github.ozozorz.aipartner.contract.TaskContract;
 import io.github.ozozorz.aipartner.core.behavior.MaidBehaviorController;
 import io.github.ozozorz.aipartner.core.behavior.ManualDirective;
-import io.github.ozozorz.aipartner.core.event.ContractLifecycleEvent;
-import io.github.ozozorz.aipartner.core.event.MaidDomainEvents;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.job.AllowedTargets;
 import io.github.ozozorz.aipartner.job.JobType;
@@ -44,7 +42,7 @@ public final class MaidTaskRuntime {
     private @Nullable MaidTask activeTask;
     private @Nullable MaidTaskContext activeContext;
     private @Nullable MaidTaskSnapshot pendingRestoreSnapshot;
-    private TaskExecutionPolicy executionPolicy = TaskExecutionPolicy.DEFAULT;
+    private String sourceId = "SYSTEM";
     private final RecoveryBudget recoveryBudget = new RecoveryBudget();
 
     public MaidTaskRuntime(
@@ -64,25 +62,23 @@ public final class MaidTaskRuntime {
             TaskContract contract,
             ServerPlayer actor,
             String rawInstruction,
-            TaskExecutionPolicy policy
+            String sourceId
     ) {
         if (partner.level().isClientSide()) {
             throw new IllegalStateException("Contracts may only be applied on the server");
         }
         Objects.requireNonNull(contract, "contract");
         Objects.requireNonNull(actor, "actor");
-        Objects.requireNonNull(policy, "policy");
 
         if (contract.job().type() == JobType.CANCEL) {
-            executeCancelContract(contract, actor, rawInstruction, policy);
+            executeCancelContract(contract, actor, rawInstruction, sourceId);
             return;
         }
 
         cancelExisting(actor, "replaced_by_new_contract");
         currentContract = contract;
-        executionPolicy = policy;
+        this.sourceId = normalizeSourceId(sourceId);
         recoveryBudget.reset();
-        publish("contract_accepted", actor, rawInstruction);
         contract.markRunning();
 
         Optional<ManualDirective> directive = ManualDirective.fromJobType(contract.job().type());
@@ -97,7 +93,6 @@ public final class MaidTaskRuntime {
                 return;
             }
         }
-        publish("contract_running", actor, rawInstruction);
         if (!isConversationalWorkflow()) {
             partner.showSpeechBubble(feedbackFor(contract.job().type()));
         }
@@ -107,19 +102,16 @@ public final class MaidTaskRuntime {
             TaskContract cancelContract,
             ServerPlayer actor,
             String rawInstruction,
-            TaskExecutionPolicy policy
+            String sourceId
     ) {
         cancelExisting(actor, rawInstruction);
         currentContract = cancelContract;
-        executionPolicy = policy;
+        this.sourceId = normalizeSourceId(sourceId);
         recoveryBudget.reset();
-        publish("contract_accepted", actor, rawInstruction);
         cancelContract.markRunning();
         behaviorController.clearActivity();
         partner.getNavigation().stop();
-        publish("contract_running", actor, rawInstruction);
         cancelContract.markCompleted();
-        publish("contract_completed", actor, rawInstruction);
         if (!isConversationalWorkflow()) {
             partner.showSpeechBubble(feedbackFor(JobType.CANCEL));
         }
@@ -135,7 +127,7 @@ public final class MaidTaskRuntime {
     }
 
     /**
-     * 激活不属于旧 Job DSL 的长期指令，例如立即返回当前活动地点。
+     * 激活不属于有限任务 JobSpec 的长期指令，例如立即返回当前活动地点。
      */
     public void activateManualDirective(ManualDirective directive, @Nullable ServerPlayer actor, String reason) {
         cancelExisting(actor, reason);
@@ -149,7 +141,7 @@ public final class MaidTaskRuntime {
     private void startRegisteredTask(TaskContract contract) {
         MaidTask task = taskRegistry.create(contract.job().type(), partner)
                 .orElseThrow(() -> new IllegalStateException(
-                        "No task registered for implemented job " + contract.job().type()
+                        "No task registered for finite job " + contract.job().type()
                 ));
         activeTask = task;
         activeContext = new MaidTaskContext(partner, contract, resultSink(contract.contractId()));
@@ -226,7 +218,6 @@ public final class MaidTaskRuntime {
         stopActiveTask();
         behaviorController.clearActivity();
         partner.getNavigation().stop();
-        publish("contract_failed", null, "runtime_monitor");
         if (!isConversationalWorkflow()) {
             notifyOwner(Component.translatable("message.ai-partner.failed", failureCode.name()));
             partner.showSpeechBubble(Component.translatable("bubble.ai-partner.task_failed"));
@@ -249,7 +240,6 @@ public final class MaidTaskRuntime {
         stopActiveTask();
         behaviorController.clearActivity();
         partner.getNavigation().stop();
-        publish("contract_completed", null, "goal_predicate_satisfied");
         if (!isConversationalWorkflow()) {
             notifyOwner(Component.translatable(
                     "message.ai-partner.completed",
@@ -261,9 +251,7 @@ public final class MaidTaskRuntime {
         }
     }
 
-    /**
-     * 取消当前契约，供实验扰动和外部服务复用。
-     */
+    /** Cancels the current contract for workflow, command, or lifecycle callers. */
     public void cancel(@Nullable ServerPlayer actor, String reason) {
         cancelExisting(actor, reason);
     }
@@ -274,20 +262,6 @@ public final class MaidTaskRuntime {
         }
         currentContract.markCancelled();
         stopActiveTask();
-        behaviorController.clearActivity();
-        partner.getNavigation().stop();
-        publish("contract_cancelled", actor, reason);
-    }
-
-    /**
-     * 为受控实验清空运行时，但把背包和装备处理留给实体生命周期层。
-     */
-    public void resetForExperiment(ServerPlayer actor) {
-        cancelExisting(actor, "experiment_reset");
-        currentContract = null;
-        stopActiveTask();
-        executionPolicy = TaskExecutionPolicy.standard("EXPERIMENT_RESET");
-        recoveryBudget.reset();
         behaviorController.clearActivity();
         partner.getNavigation().stop();
     }
@@ -320,61 +294,25 @@ public final class MaidTaskRuntime {
     }
 
     public int maximumLocalRetries() {
-        return currentContract == null || !executionPolicy.localRecoveryEnabled()
-                ? 0
-                : currentContract.failurePolicy().maxLocalRetries();
+        return currentContract == null ? 0 : currentContract.failurePolicy().maxLocalRetries();
     }
 
-    public boolean runtimeMonitoringEnabled() {
-        return executionPolicy.runtimeMonitoringEnabled();
+    /** Records one bounded deterministic recovery attempt. */
+    public boolean tryRecordRuntimeRecovery() {
+        return recoveryBudget.tryConsume(maximumLocalRetries());
     }
 
-    public boolean localRecoveryEnabled() {
-        return executionPolicy.localRecoveryEnabled();
-    }
-
-    /**
-     * 记录一次由动态世界故障触发的局部恢复。
-     */
-    public boolean tryRecordRuntimeRecovery(String reason) {
-        if (!recoveryBudget.tryConsume(maximumLocalRetries(), executionPolicy.localRecoveryEnabled())) {
-            publish("runtime_recovery_exhausted", null, reason);
-            return false;
-        }
-        publish("runtime_recovery", null, reason);
-        return true;
-    }
-
-    public int runtimeRecoveryCount() {
-        return recoveryBudget.consumed();
-    }
-
-    /**
-     * 返回当前任务的内部状态，供状态命令和冻结实验扰动观察。
-     */
+    /** Returns the current task state for player-facing status output. */
     public String activeExecutionState() {
         return activeTask == null ? behaviorController.effectiveMode().name() : activeTask.executionState();
     }
 
-    public void logRuntimeEvent(String event) {
-        publish(event, null, "runtime_executor");
-    }
-
-    /**
-     * 写入 v0.5 通用运行时数据，并保留 v0.4 字段供迁移期工具读取。
-     */
+    /** Writes the current task runtime format without emitting retired research fields. */
     public void save(ValueOutput output) {
         output.putInt("AiPartnerDataVersion", CURRENT_DATA_VERSION);
         behaviorController.save(output);
-        output.putString("CurrentOrderSource", executionPolicy.sourceId());
-        output.putString("CurrentSystemVariant", executionPolicy.sourceId());
-        output.putInt("RuntimeMonitoringEnabled", executionPolicy.runtimeMonitoringEnabled() ? 1 : 0);
-        output.putInt("LocalRecoveryEnabled", executionPolicy.localRecoveryEnabled() ? 1 : 0);
+        output.putString("CurrentOrderSource", sourceId);
         output.putInt("RuntimeRecoveryCount", recoveryBudget.consumed());
-
-        output.putInt("CollectInitialTargetCount", 0);
-        output.putInt("DepositMovedCount", 0);
-        output.putString("CompositePhase", "IDLE");
         if (activeTask != null) {
             // 世界可能在实体首次 tick 前再次保存；此时必须保留尚未应用的恢复快照。
             MaidTaskSnapshot snapshot = pendingRestoreSnapshot != null
@@ -382,7 +320,6 @@ public final class MaidTaskRuntime {
                     : activeTask.snapshot();
             output.putString("ActiveTaskId", activeTask.id());
             snapshot.write(output);
-            activeTask.writeLegacySnapshot(output, snapshot);
         }
 
         if (currentContract != null) {
@@ -390,25 +327,17 @@ public final class MaidTaskRuntime {
         }
     }
 
-    /**
-     * 加载 v0.5 数据；缺少新字段时自动使用 v0.4 契约和执行器进度字段。
-     */
+    /** Loads the current format and keeps fail-closed readers for pre-v0.10 worlds. */
     public void load(ValueInput input) {
         stopActiveTask();
         currentContract = null;
         behaviorController.load(input);
         recoveryBudget.restore(input.getIntOr("RuntimeRecoveryCount", 0));
 
-        String sourceId = input.getStringOr(
+        sourceId = normalizeSourceId(input.getStringOr(
                 "CurrentOrderSource",
-                input.getStringOr("CurrentSystemVariant", TaskExecutionPolicy.DEFAULT.sourceId())
-        );
-        TaskExecutionPolicy legacyPolicy = TaskExecutionPolicy.fromLegacySource(sourceId);
-        int monitoringValue = input.getIntOr("RuntimeMonitoringEnabled", -1);
-        int recoveryValue = input.getIntOr("LocalRecoveryEnabled", -1);
-        executionPolicy = monitoringValue < 0 || recoveryValue < 0
-                ? legacyPolicy
-                : new TaskExecutionPolicy(sourceId, monitoringValue != 0, recoveryValue != 0);
+                input.getStringOr("CurrentSystemVariant", "SYSTEM")
+        ));
 
         Optional<String> savedContractId = input.getString("ContractId");
         if (savedContractId.isEmpty()) {
@@ -455,8 +384,8 @@ public final class MaidTaskRuntime {
                 currentContract,
                 resultSink(currentContract.contractId())
         );
-        boolean hasV05Snapshot = input.getString("ActiveTaskId").isPresent();
-        pendingRestoreSnapshot = hasV05Snapshot
+        boolean hasVersionedSnapshot = input.getString("ActiveTaskId").isPresent();
+        pendingRestoreSnapshot = hasVersionedSnapshot
                 ? MaidTaskSnapshot.read(input)
                 : task.readLegacySnapshot(input);
         behaviorController.activateTaskMode(task.restoredDisplayedMode(pendingRestoreSnapshot));
@@ -487,7 +416,6 @@ public final class MaidTaskRuntime {
         output.putString("ContractFailureCode", contract.failureCode().name());
         output.putLong("ContractAcceptedAt", contract.acceptedAtEpochMillis());
         output.putInt("ContractMaxLocalRetries", contract.failurePolicy().maxLocalRetries());
-        output.putInt("ContractMaxLlmReplans", contract.failurePolicy().maxLlmReplans());
         output.putInt("ContractTimeoutSeconds", contract.failurePolicy().timeoutSeconds());
         output.putInt("ContractPredicateFormatVersion", CONTRACT_PREDICATE_FORMAT_VERSION);
         output.putInt("ContractExecutionAnchorBound", contract.executionAnchor().bound() ? 1 : 0);
@@ -512,7 +440,6 @@ public final class MaidTaskRuntime {
         TaskContract.FailurePolicy defaultPolicy = TaskContract.FailurePolicy.DEFAULT;
         TaskContract.FailurePolicy policy = new TaskContract.FailurePolicy(
                 input.getIntOr("ContractMaxLocalRetries", defaultPolicy.maxLocalRetries()),
-                input.getIntOr("ContractMaxLlmReplans", defaultPolicy.maxLlmReplans()),
                 input.getIntOr("ContractTimeoutSeconds", defaultPolicy.timeoutSeconds())
         );
         int predicateFormat = input.getIntOr("ContractPredicateFormatVersion", 0);
@@ -711,23 +638,6 @@ public final class MaidTaskRuntime {
         }
     }
 
-    private void publish(
-            String event,
-            @Nullable ServerPlayer actor,
-            String detail
-    ) {
-        if (currentContract != null) {
-            MaidDomainEvents.publish(new ContractLifecycleEvent(
-                    event,
-                    executionPolicy.sourceId(),
-                    partner,
-                    actor,
-                    currentContract,
-                    detail
-            ));
-        }
-    }
-
     private void notifyOwner(Component message) {
         if (partner.getOwner() instanceof ServerPlayer serverPlayer) {
             serverPlayer.sendSystemMessage(message);
@@ -735,8 +645,12 @@ public final class MaidTaskRuntime {
     }
 
     private boolean isConversationalWorkflow() {
-        return executionPolicy.sourceId().startsWith("LLM")
-                && executionPolicy.sourceId().contains("WORKFLOW");
+        return sourceId.startsWith("LLM") && sourceId.contains("WORKFLOW");
+    }
+
+    private static String normalizeSourceId(String sourceId) {
+        String normalized = Objects.requireNonNullElse(sourceId, "").strip();
+        return normalized.isEmpty() ? "SYSTEM" : normalized;
     }
 
     private static Component feedbackFor(JobType jobType) {

@@ -1,7 +1,6 @@
 package io.github.ozozorz.aipartner.conversation;
 
 import io.github.ozozorz.aipartner.control.MaidDriveMode;
-import io.github.ozozorz.aipartner.control.MaidDriverSettings;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.llm.MaidControlLlmGateway;
 import io.github.ozozorz.aipartner.service.PartnerService;
@@ -77,13 +76,12 @@ public final class MaidConversationNetworking {
             return;
         }
         MaidDriveMode mode = MaidDriveMode.parse(payload.driveMode()).orElse(null);
-        if (mode == null || !MaidDriverSettings.isValidEnvironmentVariableName(payload.apiKeyEnvironmentVariable())) {
+        if (mode == null) {
             player.sendSystemMessage(Component.translatable("message.ai-partner.driver.invalid_settings"));
             sendScreenData(player, maid, false);
             return;
         }
         maid.setDriveMode(mode);
-        maid.setLlmApiKeyEnvironmentVariable(payload.apiKeyEnvironmentVariable());
         MaidConversationService.cancelPending(player.getUUID());
         player.sendSystemMessage(Component.translatable(
                 "message.ai-partner.driver.updated",

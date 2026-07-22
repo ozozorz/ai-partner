@@ -73,14 +73,6 @@ public final class MaidWorkController {
         resetState();
     }
 
-    public void cycleMode() {
-        setMode(mode.next());
-    }
-
-    public boolean isActivelyWorking() {
-        return mode != MaidWorkMode.NONE && (state != State.IDLE || supplyController.isPreparing());
-    }
-
     public String executionState() {
         if (supplyController.isPreparing()) {
             return mode.name() + "_PREPARING_" + supplyController.executionState();

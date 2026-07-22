@@ -215,7 +215,7 @@ public final class DepositItemExecutor {
     }
 
     private void navigateToContainer(ServerLevel level) {
-        if (partner.usesRuntimeMonitoring() && !containerStillUsable(level)) {
+        if (!containerStillUsable(level)) {
             handleUnavailableContainer(FailureCode.TARGET_DISAPPEARED);
             return;
         }
@@ -333,10 +333,10 @@ public final class DepositItemExecutor {
     }
 
     /**
-     * 完整系统可切换到其他容器；无监控消融只执行安全终止，不进行恢复。
+     * 容器失效时在统一恢复预算内重新搜索，预算耗尽后使用原失败码终止。
      */
     private void handleUnavailableContainer(FailureCode failureCode) {
-        if (!partner.allowsLocalRecovery() || !partner.tryRecordRuntimeRecovery(failureCode.name())) {
+        if (!partner.tryRecordRuntimeRecovery()) {
             fail(failureCode);
             return;
         }
@@ -351,7 +351,6 @@ public final class DepositItemExecutor {
     private void transitionTo(State nextState) {
         state = nextState;
         stateTicks = 0;
-        partner.logRuntimeEvent("deposit_state_" + nextState.name().toLowerCase());
     }
 
     private static double horizontalDistanceSquared(BlockPos first, BlockPos second) {

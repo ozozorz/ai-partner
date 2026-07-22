@@ -1,6 +1,7 @@
 package io.github.ozozorz.aipartner.conversation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.HolderLookup;
@@ -15,6 +16,16 @@ import org.junit.jupiter.api.Test;
 
 /** Verifies the explicit privacy and context boundary of persisted dialogue history. */
 class MaidConversationMemoryTest {
+    @Test
+    void clearsPersistedDialogueOnPlayerRequest() {
+        MaidConversationMemory memory = new MaidConversationMemory();
+        memory.appendUser("remember this");
+
+        memory.clear();
+
+        assertTrue(memory.snapshot().isEmpty());
+    }
+
     private static HolderLookup.Provider registryLookup;
 
     @BeforeAll

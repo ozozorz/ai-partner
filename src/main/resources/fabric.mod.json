@@ -3,7 +3,7 @@
   "id": "ai-partner",
   "version": "${version}",
   "name": "AI Partner",
-  "description": "A reliable LLM-driven maid companion for Minecraft, built around Instruction-Behavior Contracts.",
+  "description": "A server-authoritative maid companion for Minecraft with local and bounded LLM control, built around Instruction-Behavior Contracts.",
   "authors": [
     "ozozorz"
   ],

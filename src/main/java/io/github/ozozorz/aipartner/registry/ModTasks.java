@@ -8,7 +8,7 @@ import io.github.ozozorz.aipartner.gameplay.task.TransferItemMaidTask;
 import io.github.ozozorz.aipartner.job.JobType;
 
 /**
- * v0.5 有限任务的组合根；实体只接收冻结后的通用注册表。
+ * 有限任务的组合根；实体只接收完成注册并冻结后的通用注册表。
  */
 public final class ModTasks {
     private ModTasks() {

@@ -116,17 +116,12 @@ public final class MaidBehaviorController {
         }
     }
 
-    /**
-     * 保存新的正交指令字段，同时继续写旧显示模式以兼容 v0.4 工具。
-     */
+    /** Saves the authoritative manual directive; task and schedule projections are rebuilt separately. */
     public void save(ValueOutput output) {
         output.putString(MANUAL_DIRECTIVE_TAG, manualDirective.name());
-        output.putString("PartnerMode", baseEffectiveMode().name());
     }
 
-    /**
-     * 优先读取 v0.5 指令；旧存档则从 PartnerMode 推导 FOLLOW/STAY。
-     */
+    /** Reads the current directive and falls back to the pre-directive display mode for old worlds. */
     public void load(ValueInput input) {
         PartnerMode legacyMode = PartnerMode.fromName(input.getStringOr("PartnerMode", PartnerMode.IDLE.name()));
         manualDirective = input.getString(MANUAL_DIRECTIVE_TAG)

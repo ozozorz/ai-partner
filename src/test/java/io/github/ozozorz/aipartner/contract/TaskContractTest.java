@@ -43,7 +43,7 @@ class TaskContractTest {
 
     @Test
     void restoredContractKeepsPersistedFailurePolicy() {
-        TaskContract.FailurePolicy policy = new TaskContract.FailurePolicy(4, 0, 150);
+        TaskContract.FailurePolicy policy = new TaskContract.FailurePolicy(4, 150);
 
         TaskContract contract = TaskContract.restored(
                 java.util.UUID.randomUUID(),

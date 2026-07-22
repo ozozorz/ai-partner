@@ -9,7 +9,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * B0 Rule-BT 基线解析器，也为未配置 LLM 时提供安全降级路径。
+ * 有界的确定性任务解析器，也是模型端点未就绪时的安全单意图降级路径。
  */
 public final class RuleJobParser {
     private static final Pattern ARABIC_NUMBER = Pattern.compile("(?<![\\d.])(\\d{1,2})(?![\\d.])");

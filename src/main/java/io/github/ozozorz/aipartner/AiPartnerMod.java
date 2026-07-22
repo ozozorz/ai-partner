@@ -4,10 +4,6 @@ import io.github.ozozorz.aipartner.command.MaidCommand;
 import io.github.ozozorz.aipartner.conversation.MaidConversationNetworking;
 import io.github.ozozorz.aipartner.conversation.MaidConversationService;
 import io.github.ozozorz.aipartner.llm.MaidControlLlmGateway;
-import io.github.ozozorz.aipartner.evaluation.OfflineLlmEvaluationService;
-import io.github.ozozorz.aipartner.experiment.ExperimentBatchRunner;
-import io.github.ozozorz.aipartner.experiment.ExperimentEventBridge;
-import io.github.ozozorz.aipartner.logging.ExperimentLogger;
 import io.github.ozozorz.aipartner.registry.ModEntities;
 import io.github.ozozorz.aipartner.registry.ModMenus;
 import io.github.ozozorz.aipartner.skin.MaidSkinNetworking;
@@ -31,16 +27,10 @@ public final class AiPartnerMod implements ModInitializer {
         MaidSkinNetworking.registerServer();
         MaidConversationNetworking.registerServer();
         MaidConversationService.register();
-        ExperimentEventBridge.register();
         MaidCommand.register();
-        ExperimentBatchRunner.register();
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
-            MaidConversationService.cancelAll();
-            OfflineLlmEvaluationService.getInstance().pauseForServerStop();
-            ExperimentLogger.getInstance().flush();
-        });
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> MaidConversationService.cancelAll());
         LOGGER.info(
-                "AI Partner initialized for Minecraft 26.1.2; gameplay LLM model={} (readiness is configured per maid)",
+                "AI Partner initialized for Minecraft 26.1.2; gameplay LLM model={} (driver mode is per maid; credentials are server-owned)",
                 MaidControlLlmGateway.getInstance().model()
         );
     }

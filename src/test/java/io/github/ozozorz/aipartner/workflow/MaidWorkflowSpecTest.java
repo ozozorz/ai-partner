@@ -44,6 +44,14 @@ class MaidWorkflowSpecTest {
                         new MaidControlIntent.QueryStatus()
                 )
         ));
+        assertThrows(IllegalArgumentException.class, () -> MaidWorkflowSpec.llm(
+                UUID.randomUUID(),
+                "return home then query",
+                List.of(
+                        new MaidControlIntent.ReturnHome(),
+                        new MaidControlIntent.QueryStatus()
+                )
+        ));
     }
 
     @Test

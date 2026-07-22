@@ -119,7 +119,7 @@ public final class CollectBlockExecutor {
             fail(FailureCode.PERMISSION_DENIED);
             return;
         }
-        if (partner.usesRuntimeMonitoring() && goalSatisfied()) {
+        if (goalSatisfied()) {
             transitionTo(State.COMPLETE);
             resultListener().onCompleted();
             return;
@@ -231,7 +231,7 @@ public final class CollectBlockExecutor {
     }
 
     private void navigateToTarget(ServerLevel level) {
-        if (partner.usesRuntimeMonitoring() && !targetStillExists(level)) {
+        if (!targetStillExists(level)) {
             handleUnavailableTarget(FailureCode.TARGET_DISAPPEARED);
             return;
         }
@@ -372,10 +372,10 @@ public final class CollectBlockExecutor {
     }
 
     /**
-     * 完整系统可重新搜索替代目标；LLM-Schema 与 A2 在动作级安全检查处直接失败。
+     * 目标失效时在统一恢复预算内重新搜索，预算耗尽后使用原失败码终止。
      */
     private void handleUnavailableTarget(FailureCode failureCode) {
-        if (!partner.allowsLocalRecovery() || !partner.tryRecordRuntimeRecovery(failureCode.name())) {
+        if (!partner.tryRecordRuntimeRecovery()) {
             fail(failureCode);
             return;
         }
@@ -390,7 +390,6 @@ public final class CollectBlockExecutor {
     private void transitionTo(State nextState) {
         state = nextState;
         stateTicks = 0;
-        partner.logRuntimeEvent("collect_state_" + nextState.name().toLowerCase());
     }
 
     private static double horizontalDistanceSquared(BlockPos first, BlockPos second) {

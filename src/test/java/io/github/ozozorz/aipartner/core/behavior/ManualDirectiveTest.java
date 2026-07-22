@@ -8,7 +8,7 @@ import io.github.ozozorz.aipartner.job.JobType;
 import org.junit.jupiter.api.Test;
 
 /**
- * 验证长期指令与旧 JobType/PartnerMode 的迁移映射。
+ * 验证长期指令映射与早期混合 PartnerMode 的迁移。
  */
 class ManualDirectiveTest {
     @Test

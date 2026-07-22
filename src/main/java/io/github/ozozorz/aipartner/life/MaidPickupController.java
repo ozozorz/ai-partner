@@ -1,8 +1,6 @@
 package io.github.ozozorz.aipartner.life;
 
 import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
-import io.github.ozozorz.aipartner.core.event.MaidDomainEvents;
-import io.github.ozozorz.aipartner.core.event.MaidExperienceEvent;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.growth.MaidGrowthData;
 import io.github.ozozorz.aipartner.mixin.ExperienceOrbAccessor;
@@ -97,8 +95,7 @@ public final class MaidPickupController {
                 candidate -> lifeController.permitsPickupAt(candidate.blockPosition())
         )) {
             int amount = orb.getValue();
-            RepairResult result = repairEquipment(level, amount);
-            int growthExperience = result.remainingExperience();
+            int growthExperience = repairEquipment(level, amount);
             if (growthExperience > 0) {
                 growthData.addExperience(growthExperience);
                 partner.syncGrowthData();
@@ -111,18 +108,11 @@ public final class MaidPickupController {
             } else {
                 accessor.aiPartner$setCount(remainingCount);
             }
-            MaidDomainEvents.publish(new MaidExperienceEvent(
-                    partner,
-                    amount,
-                    result.repairedDurability(),
-                    growthExperience
-            ));
         }
     }
 
-    private RepairResult repairEquipment(ServerLevel level, int experience) {
+    private int repairEquipment(ServerLevel level, int experience) {
         int remaining = experience;
-        int repaired = 0;
         while (remaining > 0) {
             Optional<EnchantedItemInUse> selected = EnchantmentHelper.getRandomItemWith(
                     EnchantmentEffectComponents.REPAIR_WITH_XP,
@@ -139,15 +129,11 @@ public final class MaidPickupController {
             }
             int repair = Math.min(repairCapacity, stack.getDamageValue());
             stack.setDamageValue(stack.getDamageValue() - repair);
-            repaired += repair;
             if (repair <= 0) {
                 break;
             }
             remaining -= repair * remaining / repairCapacity;
         }
-        return new RepairResult(remaining, repaired);
-    }
-
-    private record RepairResult(int remainingExperience, int repairedDurability) {
+        return remaining;
     }
 }

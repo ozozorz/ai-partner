@@ -6,11 +6,9 @@ package io.github.ozozorz.aipartner.core.task;
 public final class RecoveryBudget {
     private int consumed;
 
-    /**
-     * 尝试消耗一次恢复预算；关闭恢复或预算耗尽时返回 false。
-     */
-    public boolean tryConsume(int maximum, boolean enabled) {
-        if (!enabled || maximum <= 0 || consumed >= maximum) {
+    /** 尝试消耗一次恢复预算；预算为零或耗尽时返回 false。 */
+    public boolean tryConsume(int maximum) {
+        if (maximum <= 0 || consumed >= maximum) {
             return false;
         }
         consumed++;

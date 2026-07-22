@@ -1,41 +1,25 @@
 package io.github.ozozorz.aipartner.command;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
-import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import io.github.ozozorz.aipartner.AiPartnerMod;
 import io.github.ozozorz.aipartner.conversation.MaidConversationService;
 import io.github.ozozorz.aipartner.contract.JobSpec;
 import io.github.ozozorz.aipartner.combat.CombatPolicy;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
 import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
 import io.github.ozozorz.aipartner.control.MaidDriveMode;
-import io.github.ozozorz.aipartner.control.MaidDriverSettings;
 import io.github.ozozorz.aipartner.control.MaidControlDecision;
 import io.github.ozozorz.aipartner.control.MaidControlIntent;
 import io.github.ozozorz.aipartner.control.MaidControlService;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
-import io.github.ozozorz.aipartner.evaluation.OfflineEvaluationService;
-import io.github.ozozorz.aipartner.evaluation.OfflineLlmEvaluationService;
-import io.github.ozozorz.aipartner.experiment.ExperimentBatchRunner;
-import io.github.ozozorz.aipartner.experiment.ExperimentBatchStore;
-import io.github.ozozorz.aipartner.experiment.ExperimentFreezeService;
-import io.github.ozozorz.aipartner.experiment.ExperimentProtocol;
-import io.github.ozozorz.aipartner.experiment.ExperimentScenario;
-import io.github.ozozorz.aipartner.experiment.ExperimentScenarioRegistry;
-import io.github.ozozorz.aipartner.experiment.ExperimentScenarioService;
-import io.github.ozozorz.aipartner.experiment.ExperimentSessionRegistry;
-import io.github.ozozorz.aipartner.experiment.SystemVariant;
 import io.github.ozozorz.aipartner.job.JobType;
 import io.github.ozozorz.aipartner.job.AllowedTargets;
 import io.github.ozozorz.aipartner.job.ContainerTargets;
-import io.github.ozozorz.aipartner.logging.ExperimentLogger;
 import io.github.ozozorz.aipartner.life.ActivityLocationType;
-import io.github.ozozorz.aipartner.parser.RuleJobParser;
 import io.github.ozozorz.aipartner.service.PartnerService;
 import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import java.util.UUID;
@@ -119,7 +103,6 @@ public final class MaidCommand {
                                         ))
                                         .executes(MaidCommand::setCombatPolicy)))
                         .then(createDriverCommand())
-                        .then(createExperimentCommand())
                         .then(Commands.literal("follow").executes(context -> runBasicJob(context, JobType.FOLLOW)))
                         .then(Commands.literal("stay").executes(context -> runBasicJob(context, JobType.STAY)))
                         .then(Commands.literal("cancel").executes(context -> runBasicJob(context, JobType.CANCEL)))
@@ -211,7 +194,7 @@ public final class MaidCommand {
         return Commands.literal(literal).executes(context -> configureLocation(context, type, set));
     }
 
-    /** Builds the per-maid local/LLM driver configuration command. */
+    /** Builds the per-maid LOCAL/LLM mode command; credentials remain server-configured. */
     private static LiteralArgumentBuilder<CommandSourceStack> createDriverCommand() {
         return Commands.literal("driver")
                 .executes(MaidCommand::showDriverSettings)
@@ -223,9 +206,7 @@ public final class MaidCommand {
                                         builder
                                 ))
                                 .executes(MaidCommand::setDriverMode)))
-                .then(Commands.literal("api-key-env")
-                        .then(Commands.argument("environment-variable", StringArgumentType.word())
-                                .executes(MaidCommand::setDriverApiKeyEnvironmentVariable)));
+                .then(Commands.literal("clear-memory").executes(MaidCommand::clearConversationMemory));
     }
 
     private static int showDriverSettings(
@@ -273,7 +254,8 @@ public final class MaidCommand {
         return 1;
     }
 
-    private static int setDriverApiKeyEnvironmentVariable(
+    /** Clears bounded dialogue history after cancelling responses that could append stale text. */
+    private static int clearConversationMemory(
             CommandContext<CommandSourceStack> context
     ) throws CommandSyntaxException {
         ServerPlayer player = context.getSource().getPlayerOrException();
@@ -281,123 +263,13 @@ public final class MaidCommand {
         if (partner == null) {
             return 0;
         }
-        String variableName = StringArgumentType.getString(context, "environment-variable");
-        if (!MaidDriverSettings.isValidEnvironmentVariableName(variableName)) {
-            context.getSource().sendFailure(Component.translatable("message.ai-partner.driver.invalid_env"));
-            return 0;
-        }
-        partner.setLlmApiKeyEnvironmentVariable(variableName);
         MaidConversationService.cancelPending(player.getUUID());
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "message.ai-partner.driver.env_set",
-                partner.getName(),
-                partner.getLlmApiKeyEnvironmentVariable()
-        ), false);
+        partner.conversationMemory().clear();
+        context.getSource().sendSuccess(
+                () -> Component.translatable("message.ai-partner.driver.memory_cleared", partner.getName()),
+                false
+        );
         return 1;
-    }
-
-    /**
-     * 构造管理员实验命令树，拆分方法可降低新增自动化选项时的括号错误风险。
-     */
-    private static LiteralArgumentBuilder<CommandSourceStack> createExperimentCommand() {
-        return Commands.literal("experiment")
-                .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-                .then(Commands.literal("list").executes(MaidCommand::listExperimentScenarios))
-                .then(Commands.literal("reset")
-                        .then(Commands.argument("scenario", StringArgumentType.word())
-                                .suggests((context, builder) -> SharedSuggestionProvider.suggest(
-                                        ExperimentScenarioRegistry.ids(),
-                                        builder
-                                ))
-                                .executes(MaidCommand::resetExperimentScenario)))
-                .then(Commands.literal("disturb").executes(MaidCommand::disturbExperimentScenario))
-                .then(Commands.literal("context").executes(MaidCommand::showExperimentContext))
-                .then(Commands.literal("export-evaluation").executes(MaidCommand::exportOfflineEvaluation))
-                .then(Commands.literal("freeze")
-                        .then(Commands.argument("pretest_batch_id", StringArgumentType.word())
-                                .executes(MaidCommand::freezeExperiment)))
-                .then(createBatchCommand())
-                .then(createOfflineCommand())
-                .then(Commands.literal("clear").executes(MaidCommand::clearExperimentContext));
-    }
-
-    /**
-     * 构造场景批处理、断点恢复和消融命令。
-     */
-    private static LiteralArgumentBuilder<CommandSourceStack> createBatchCommand() {
-        return Commands.literal("batch")
-                .then(Commands.literal("pretest")
-                        .executes(context -> startPretestBatch(context, null))
-                        .then(Commands.argument("batch_id", StringArgumentType.word())
-                                .executes(context -> startPretestBatch(
-                                        context,
-                                        StringArgumentType.getString(context, "batch_id")
-                                ))))
-                .then(Commands.literal("rule-bt")
-                        .executes(context -> startRuleBtBatch(context, null))
-                        .then(Commands.argument("batch_id", StringArgumentType.word())
-                                .executes(context -> startRuleBtBatch(
-                                        context,
-                                        StringArgumentType.getString(context, "batch_id")
-                                ))))
-                .then(Commands.literal("main")
-                        .then(Commands.argument("repetitions", IntegerArgumentType.integer(3, 5))
-                                .executes(context -> startMainBatch(context, null))
-                                .then(Commands.argument("batch_id", StringArgumentType.word())
-                                        .executes(context -> startMainBatch(
-                                                context,
-                                                StringArgumentType.getString(context, "batch_id")
-                                        )))))
-                .then(Commands.literal("variant")
-                        .then(Commands.argument("system_variant", StringArgumentType.word())
-                                .suggests((context, builder) -> SharedSuggestionProvider.suggest(
-                                        java.util.Arrays.stream(SystemVariant.values()).map(Enum::name).toList(),
-                                        builder
-                                ))
-                                .then(Commands.argument("repetitions", IntegerArgumentType.integer(1, 5))
-                                        .executes(context -> startVariantBatch(context, null))
-                                        .then(Commands.argument("batch_id", StringArgumentType.word())
-                                                .executes(context -> startVariantBatch(
-                                                        context,
-                                                        StringArgumentType.getString(context, "batch_id")
-                                                ))))))
-                .then(Commands.literal("resume")
-                        .then(Commands.argument("batch_id", StringArgumentType.word())
-                                .executes(MaidCommand::resumeBatch)))
-                .then(Commands.literal("status").executes(MaidCommand::showBatchStatus))
-                .then(Commands.literal("abort").executes(MaidCommand::abortBatch));
-    }
-
-    /**
-     * 构造冻结模型离线评测的启动、恢复、状态和取消命令。
-     */
-    private static LiteralArgumentBuilder<CommandSourceStack> createOfflineCommand() {
-        return Commands.literal("offline")
-                .then(Commands.literal("start")
-                        .then(Commands.argument("limit", IntegerArgumentType.integer(1, 72))
-                                .executes(context -> startOfflineEvaluation(
-                                        context,
-                                        ExperimentProtocol.definition().offlineDefaultCostCapUsd(),
-                                        null
-                                ))
-                                .then(Commands.argument(
-                                        "cost_cap_usd",
-                                        DoubleArgumentType.doubleArg(0.01, 100.0)
-                                ).executes(context -> startOfflineEvaluation(
-                                        context,
-                                        DoubleArgumentType.getDouble(context, "cost_cap_usd"),
-                                        null
-                                )).then(Commands.argument("run_id", StringArgumentType.word())
-                                        .executes(context -> startOfflineEvaluation(
-                                                context,
-                                                DoubleArgumentType.getDouble(context, "cost_cap_usd"),
-                                                StringArgumentType.getString(context, "run_id")
-                                        ))))))
-                .then(Commands.literal("resume")
-                        .then(Commands.argument("run_id", StringArgumentType.word())
-                                .executes(MaidCommand::resumeOfflineEvaluation)))
-                .then(Commands.literal("status").executes(MaidCommand::showOfflineStatus))
-                .then(Commands.literal("cancel").executes(MaidCommand::cancelOfflineEvaluation));
     }
 
     private static int showHelp(CommandContext<CommandSourceStack> context) {
@@ -664,340 +536,6 @@ public final class MaidCommand {
         );
     }
 
-    private static int listExperimentScenarios(CommandContext<CommandSourceStack> context) {
-        for (ExperimentScenario scenario : ExperimentScenarioRegistry.all()) {
-            context.getSource().sendSuccess(
-                    () -> Component.translatable(
-                            "message.ai-partner.experiment.list_entry",
-                            scenario.id(),
-                            scenario.instruction(),
-                            scenario.expectedOutcome()
-                    ),
-                    false
-            );
-        }
-        return ExperimentScenarioRegistry.all().size();
-    }
-
-    private static int resetExperimentScenario(
-            CommandContext<CommandSourceStack> context
-    ) throws CommandSyntaxException {
-        ServerPlayer player = context.getSource().getPlayerOrException();
-        String scenarioId = StringArgumentType.getString(context, "scenario");
-        ExperimentScenario scenario = ExperimentScenarioRegistry.find(scenarioId).orElse(null);
-        if (scenario == null) {
-            context.getSource().sendFailure(Component.translatable("message.ai-partner.experiment.unknown", scenarioId));
-            return 0;
-        }
-        cancelPendingRequest(player.getUUID());
-        ExperimentScenarioService.Result result = ExperimentScenarioService.reset(player, scenario);
-        if (!result.successful()) {
-            context.getSource().sendFailure(Component.translatable(
-                    "message.ai-partner.experiment.failed",
-                    result.error()
-            ));
-            return 0;
-        }
-        ExperimentSessionRegistry.Context active = result.context();
-        context.getSource().sendSuccess(
-                () -> Component.translatable(
-                        "message.ai-partner.experiment.reset",
-                        scenario.id(),
-                        active.episodeId().toString(),
-                        scenario.instruction(),
-                        scenario.expectedOutcome(),
-                        active.anchor().getX(),
-                        active.anchor().getY(),
-                        active.anchor().getZ()
-                ),
-                true
-        );
-        return 1;
-    }
-
-    private static int disturbExperimentScenario(
-            CommandContext<CommandSourceStack> context
-    ) throws CommandSyntaxException {
-        ExperimentScenarioService.Result result = ExperimentScenarioService.disturb(
-                context.getSource().getPlayerOrException()
-        );
-        if (!result.successful()) {
-            context.getSource().sendFailure(Component.translatable(
-                    "message.ai-partner.experiment.failed",
-                    result.error()
-            ));
-            return 0;
-        }
-        context.getSource().sendSuccess(
-                () -> Component.translatable("message.ai-partner.experiment.disturbed", result.scenario().id()),
-                true
-        );
-        return 1;
-    }
-
-    private static int showExperimentContext(
-            CommandContext<CommandSourceStack> context
-    ) throws CommandSyntaxException {
-        ExperimentSessionRegistry.Context active = ExperimentSessionRegistry.current(
-                context.getSource().getPlayerOrException()
-        ).orElse(null);
-        if (active == null) {
-            context.getSource().sendFailure(Component.translatable("message.ai-partner.experiment.no_context"));
-            return 0;
-        }
-        context.getSource().sendSuccess(
-                () -> Component.translatable(
-                        "message.ai-partner.experiment.context",
-                        active.batchId(),
-                        active.episodeId().toString(),
-                        active.scenarioId(),
-                        active.expectedOutcome(),
-                        active.worldSeed()
-                ),
-                false
-        );
-        return 1;
-    }
-
-    private static int clearExperimentContext(
-            CommandContext<CommandSourceStack> context
-    ) throws CommandSyntaxException {
-        ServerPlayer player = context.getSource().getPlayerOrException();
-        ExperimentSessionRegistry.Context active = ExperimentSessionRegistry.current(player).orElse(null);
-        if (active != null) {
-            ExperimentLogger.getInstance().logScenarioEvent("scenario_context_cleared", player, active, "CLEARED");
-        }
-        ExperimentSessionRegistry.clear(player);
-        context.getSource().sendSuccess(
-                () -> Component.translatable("message.ai-partner.experiment.cleared"),
-                false
-        );
-        return 1;
-    }
-
-    private static int exportOfflineEvaluation(CommandContext<CommandSourceStack> context) {
-        try {
-            OfflineEvaluationService.ExportReport report = OfflineEvaluationService.exportAndEvaluateRuleBaseline();
-            context.getSource().sendSuccess(
-                    () -> Component.translatable(
-                            "message.ai-partner.experiment.evaluation_exported",
-                            report.metrics().total(),
-                            report.metrics().exactMatches(),
-                            String.format(java.util.Locale.ROOT, "%.3f", report.metrics().exactMatchAccuracy()),
-                            report.datasetPath().toAbsolutePath().toString(),
-                            report.predictionPath().toAbsolutePath().toString(),
-                            report.metricsPath().toAbsolutePath().toString()
-                    ),
-                    false
-            );
-            return 1;
-        } catch (java.io.IOException | RuntimeException exception) {
-            AiPartnerMod.LOGGER.error("Failed to export AI Partner offline evaluation", exception);
-            context.getSource().sendFailure(Component.translatable(
-                    "message.ai-partner.experiment.failed",
-                    exception.getClass().getSimpleName()
-            ));
-            return 0;
-        }
-    }
-
-    private static int freezeExperiment(CommandContext<CommandSourceStack> context) {
-        String pretestBatchId = StringArgumentType.getString(context, "pretest_batch_id");
-        try {
-            ExperimentFreezeService.FreezeLock lock = ExperimentFreezeService.freeze(pretestBatchId);
-            context.getSource().sendSuccess(
-                    () -> Component.literal(
-                            "v0.4 frozen: fingerprint=" + lock.snapshot().fingerprint()
-                                    + ", lock=" + ExperimentFreezeService.lockPath().toAbsolutePath()
-                    ),
-                    true
-            );
-            return 1;
-        } catch (java.io.IOException | RuntimeException exception) {
-            context.getSource().sendFailure(Component.literal("Freeze failed: " + safeMessage(exception)));
-            return 0;
-        }
-    }
-
-    private static int startPretestBatch(
-            CommandContext<CommandSourceStack> context,
-            String batchId
-    ) throws CommandSyntaxException {
-        return sendBatchOperation(
-                context,
-                ExperimentBatchRunner.getInstance().startPretest(
-                        context.getSource().getPlayerOrException(),
-                        batchId
-                )
-        );
-    }
-
-    private static int startRuleBtBatch(
-            CommandContext<CommandSourceStack> context,
-            String batchId
-    ) throws CommandSyntaxException {
-        return sendBatchOperation(
-                context,
-                ExperimentBatchRunner.getInstance().startRuleBtPretest(
-                        context.getSource().getPlayerOrException(),
-                        batchId
-                )
-        );
-    }
-
-    private static int startMainBatch(
-            CommandContext<CommandSourceStack> context,
-            String batchId
-    ) throws CommandSyntaxException {
-        return sendBatchOperation(
-                context,
-                ExperimentBatchRunner.getInstance().startMain(
-                        context.getSource().getPlayerOrException(),
-                        IntegerArgumentType.getInteger(context, "repetitions"),
-                        batchId
-                )
-        );
-    }
-
-    private static int startVariantBatch(
-            CommandContext<CommandSourceStack> context,
-            String batchId
-    ) throws CommandSyntaxException {
-        String rawVariant = StringArgumentType.getString(context, "system_variant");
-        SystemVariant variant = SystemVariant.parse(rawVariant).orElse(null);
-        if (variant == null) {
-            context.getSource().sendFailure(Component.literal("Unknown system variant: " + rawVariant));
-            return 0;
-        }
-        return sendBatchOperation(
-                context,
-                ExperimentBatchRunner.getInstance().startVariant(
-                        context.getSource().getPlayerOrException(),
-                        variant,
-                        IntegerArgumentType.getInteger(context, "repetitions"),
-                        batchId
-                )
-        );
-    }
-
-    private static int resumeBatch(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-        return sendBatchOperation(
-                context,
-                ExperimentBatchRunner.getInstance().resume(
-                        context.getSource().getPlayerOrException(),
-                        StringArgumentType.getString(context, "batch_id")
-                )
-        );
-    }
-
-    private static int abortBatch(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-        return sendBatchOperation(
-                context,
-                ExperimentBatchRunner.getInstance().abort(context.getSource().getPlayerOrException())
-        );
-    }
-
-    private static int showBatchStatus(CommandContext<CommandSourceStack> context) {
-        ExperimentBatchRunner.Status status = ExperimentBatchRunner.getInstance().status();
-        context.getSource().sendSuccess(
-                () -> Component.literal(
-                        status.active()
-                                ? "Batch " + status.batchId() + " " + status.nextIndex() + "/" + status.total()
-                                + " kind=" + status.batchKind() + " phase=" + status.phase()
-                                : "No experiment batch is active"
-                ),
-                false
-        );
-        return status.active() ? 1 : 0;
-    }
-
-    private static int sendBatchOperation(
-            CommandContext<CommandSourceStack> context,
-            ExperimentBatchRunner.OperationResult result
-    ) {
-        if (!result.successful()) {
-            context.getSource().sendFailure(Component.literal("Batch operation failed: " + result.error()));
-            return 0;
-        }
-        context.getSource().sendSuccess(
-                () -> Component.literal(
-                        "Batch " + result.batchId() + " ready at " + result.nextIndex() + "/" + result.total()
-                                + "; checkpoint="
-                                + ExperimentBatchStore.batchDirectory(result.batchId()).resolve("checkpoint.json")
-                        ),
-                true
-        );
-        return 1;
-    }
-
-    private static int startOfflineEvaluation(
-            CommandContext<CommandSourceStack> context,
-            double costCapUsd,
-            String runId
-    ) {
-        return sendOfflineOperation(
-                context,
-                OfflineLlmEvaluationService.getInstance().start(
-                        IntegerArgumentType.getInteger(context, "limit"),
-                        costCapUsd,
-                        runId
-                )
-        );
-    }
-
-    private static int resumeOfflineEvaluation(CommandContext<CommandSourceStack> context) {
-        return sendOfflineOperation(
-                context,
-                OfflineLlmEvaluationService.getInstance().resume(
-                        StringArgumentType.getString(context, "run_id")
-                )
-        );
-    }
-
-    private static int cancelOfflineEvaluation(CommandContext<CommandSourceStack> context) {
-        return sendOfflineOperation(context, OfflineLlmEvaluationService.getInstance().cancel());
-    }
-
-    private static int showOfflineStatus(CommandContext<CommandSourceStack> context) {
-        OfflineLlmEvaluationService.Status status = OfflineLlmEvaluationService.getInstance().status();
-        context.getSource().sendSuccess(
-                () -> Component.literal(
-                        status.active()
-                                ? "Offline run " + status.runId() + " " + status.completedCases() + "/"
-                                + status.plannedCases() + ", attempts=" + status.totalAttempts()
-                                + ", reserved=$" + String.format(java.util.Locale.ROOT, "%.4f", status.reservedCostUsd())
-                                + "/$" + String.format(java.util.Locale.ROOT, "%.4f", status.costCapUsd())
-                                : "No offline model evaluation is active"
-                ),
-                false
-        );
-        return status.active() ? 1 : 0;
-    }
-
-    private static int sendOfflineOperation(
-            CommandContext<CommandSourceStack> context,
-            OfflineLlmEvaluationService.OperationResult result
-    ) {
-        if (!result.successful()) {
-            context.getSource().sendFailure(Component.literal("Offline evaluation failed: " + result.error()));
-            return 0;
-        }
-        context.getSource().sendSuccess(
-                () -> Component.literal(
-                        "Offline run " + result.runId() + " ready at " + result.completedCases() + "/"
-                                + result.plannedCases() + ", cost cap=$"
-                                + String.format(java.util.Locale.ROOT, "%.4f", result.costCapUsd())
-                ),
-                true
-        );
-        return 1;
-    }
-
-    private static String safeMessage(Throwable throwable) {
-        String message = throwable.getMessage();
-        return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
-    }
-
     private static int runBasicJob(CommandContext<CommandSourceStack> context, JobType type) throws CommandSyntaxException {
         cancelPendingRequest(context.getSource().getPlayerOrException().getUUID());
         return compileAndRun(context, JobSpec.basic(type), type.name().toLowerCase());
@@ -1031,7 +569,7 @@ public final class MaidCommand {
         );
     }
 
-    /** 通用物流与冻结 v0.4 存箱任务使用独立 JobType，避免改变旧实验白名单。 */
+    /** 通用物流使用独立 JobType，并复用安全存箱执行器。 */
     private static int runTransferJob(
             CommandContext<CommandSourceStack> context,
             int radius

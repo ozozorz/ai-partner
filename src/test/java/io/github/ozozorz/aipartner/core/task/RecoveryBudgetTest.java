@@ -14,18 +14,17 @@ class RecoveryBudgetTest {
     void rejectsRecoveryAfterTotalBudgetIsConsumed() {
         RecoveryBudget budget = new RecoveryBudget();
 
-        assertTrue(budget.tryConsume(2, true));
-        assertTrue(budget.tryConsume(2, true));
-        assertFalse(budget.tryConsume(2, true));
+        assertTrue(budget.tryConsume(2));
+        assertTrue(budget.tryConsume(2));
+        assertFalse(budget.tryConsume(2));
         assertEquals(2, budget.consumed());
     }
 
     @Test
-    void disabledRecoveryDoesNotConsumeBudget() {
+    void zeroRecoveryBudgetDoesNotConsume() {
         RecoveryBudget budget = new RecoveryBudget();
 
-        assertFalse(budget.tryConsume(2, false));
-        assertFalse(budget.tryConsume(0, true));
+        assertFalse(budget.tryConsume(0));
         assertEquals(0, budget.consumed());
     }
 
@@ -34,9 +33,9 @@ class RecoveryBudgetTest {
         RecoveryBudget budget = new RecoveryBudget();
         budget.restore(2);
 
-        assertFalse(budget.tryConsume(2, true));
+        assertFalse(budget.tryConsume(2));
         budget.reset();
-        assertTrue(budget.tryConsume(2, true));
+        assertTrue(budget.tryConsume(2));
         assertEquals(1, budget.consumed());
     }
 }

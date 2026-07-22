@@ -210,6 +210,13 @@ public final class MaidWorkflowRuntime {
         publish("workflow_cancelled", actor, lastEvidence());
     }
 
+    /** Cancels only the expected workflow so a stale asynchronous request cannot affect its replacement. */
+    public void cancel(UUID expectedWorkflowId, @Nullable ServerPlayer actor, String reason) {
+        if (matches(expectedWorkflowId)) {
+            cancel(actor, reason);
+        }
+    }
+
     /** Returns true only while the given workflow may dispatch its current semantic step. */
     public boolean acceptsInvocation(UUID candidateWorkflowId) {
         return matches(candidateWorkflowId) && status == MaidWorkflowStatus.RUNNING;

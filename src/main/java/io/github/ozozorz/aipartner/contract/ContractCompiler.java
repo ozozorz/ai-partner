@@ -23,9 +23,6 @@ public final class ContractCompiler {
         }
 
         TaskDefinition definition = TaskDefinitionRegistry.get(candidate.type());
-        if (!definition.implemented()) {
-            return ContractDecision.rejected(FailureCode.UNSUPPORTED_JOB, "message.ai-partner.unsupported_milestone");
-        }
         if (!definition.acceptsShape(candidate)) {
             if (definition.targetRequired() && !definition.acceptsTarget(candidate.target())) {
                 return ContractDecision.rejected(FailureCode.UNSUPPORTED_JOB, "message.ai-partner.target_not_allowed");

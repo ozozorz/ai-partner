@@ -29,7 +29,7 @@ import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 
 /**
- * 构造 v0.8 的自然树砍伐、暴露矿石、原版熔炉和真实钓鱼规则。
+ * 构造自然树砍伐、暴露矿石、原版熔炉和真实钓鱼规则。
  */
 public final class ComplexWorkRules {
     private ComplexWorkRules() {

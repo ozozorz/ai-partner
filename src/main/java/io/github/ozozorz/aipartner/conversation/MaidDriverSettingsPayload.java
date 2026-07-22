@@ -6,11 +6,10 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
-/** Client request that changes only the mode and API-key environment variable name. */
+/** Client request that changes one owned maid's interpreter mode. */
 public record MaidDriverSettingsPayload(
         UUID maidId,
-        String driveMode,
-        String apiKeyEnvironmentVariable
+        String driveMode
 ) implements CustomPacketPayload {
     public static final Type<MaidDriverSettingsPayload> TYPE = new Type<>(AiPartnerMod.id("driver_settings"));
     public static final StreamCodec<RegistryFriendlyByteBuf, MaidDriverSettingsPayload> CODEC =
@@ -19,14 +18,12 @@ public record MaidDriverSettingsPayload(
     private void write(RegistryFriendlyByteBuf buffer) {
         buffer.writeUUID(maidId);
         buffer.writeUtf(driveMode, 8);
-        buffer.writeUtf(apiKeyEnvironmentVariable, 64);
     }
 
     private static MaidDriverSettingsPayload read(RegistryFriendlyByteBuf buffer) {
         return new MaidDriverSettingsPayload(
                 buffer.readUUID(),
-                buffer.readUtf(8),
-                buffer.readUtf(64)
+                buffer.readUtf(8)
         );
     }
 

@@ -8,7 +8,6 @@ import java.util.Set;
  */
 public record TaskDefinition(
         JobType type,
-        boolean implemented,
         boolean targetRequired,
         int minimumQuantity,
         int maximumQuantity,

@@ -6,9 +6,7 @@ import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * 轻量领域事件分发器，使实验和日志系统只能观察核心行为。
- */
+/** Isolated in-process event dispatcher for workflow outcome handling. */
 public final class MaidDomainEvents {
     private static final Logger LOGGER = LoggerFactory.getLogger(MaidDomainEvents.class);
     private static final CopyOnWriteArrayList<Consumer<MaidDomainEvent>> LISTENERS = new CopyOnWriteArrayList<>();
@@ -16,9 +14,7 @@ public final class MaidDomainEvents {
     private MaidDomainEvents() {
     }
 
-    /**
-     * 注册只读观察者。监听器异常会被隔离，不能中断女仆任务。
-     */
+    /** Registers an observer whose failures cannot interrupt the maid runtime. */
     public static void register(Consumer<MaidDomainEvent> listener) {
         Consumer<MaidDomainEvent> checked = Objects.requireNonNull(listener, "listener");
         if (!LISTENERS.contains(checked)) {
@@ -26,9 +22,7 @@ public final class MaidDomainEvents {
         }
     }
 
-    /**
-     * 向全部外围观察者发布事件。
-     */
+    /** Publishes an immutable workflow event to all observers. */
     public static void publish(MaidDomainEvent event) {
         for (Consumer<MaidDomainEvent> listener : LISTENERS) {
             try {

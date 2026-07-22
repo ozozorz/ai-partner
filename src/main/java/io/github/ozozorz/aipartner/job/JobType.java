@@ -1,7 +1,7 @@
 package io.github.ozozorz.aipartner.job;
 
 /**
- * 第一版 Job DSL 的白名单任务类型。
+ * 有限任务运行时支持的白名单任务类型。
  */
 public enum JobType {
     FOLLOW,

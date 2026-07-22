@@ -1,7 +1,6 @@
 package io.github.ozozorz.aipartner.client.screen;
 
 import io.github.ozozorz.aipartner.control.MaidDriveMode;
-import io.github.ozozorz.aipartner.control.MaidDriverSettings;
 import io.github.ozozorz.aipartner.conversation.MaidConversationScreenPayload;
 import io.github.ozozorz.aipartner.conversation.MaidDialogueSubmitPayload;
 import io.github.ozozorz.aipartner.conversation.MaidDriverSettingsPayload;
@@ -15,7 +14,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 
-/** Dedicated natural-language screen with per-maid local/LLM settings. */
+/** Dedicated natural-language screen with per-maid mode and server-owned credential status. */
 public final class MaidConversationScreen extends Screen {
     private static final int PANEL_WIDTH = 360;
     private static final int PANEL_HEIGHT = 196;
@@ -67,10 +66,8 @@ public final class MaidConversationScreen extends Screen {
                 20,
                 Component.translatable("gui.ai-partner.dialogue.api_key_env")
         ));
-        environmentVariableBox.setMaxLength(MaidDriverSettings.MAX_ENVIRONMENT_VARIABLE_LENGTH);
         environmentVariableBox.setValue(data.apiKeyEnvironmentVariable());
-        environmentVariableBox.setHint(Component.translatable("gui.ai-partner.dialogue.api_key_env_hint"));
-        environmentVariableBox.setResponder(ignored -> updateControls());
+        environmentVariableBox.setEditable(false);
 
         messageBox = addRenderableWidget(new EditBox(
                 font,
@@ -124,34 +121,27 @@ public final class MaidConversationScreen extends Screen {
                 "gui.ai-partner.dialogue.mode",
                 Component.translatable("driver.ai-partner." + selectedMode.serializedName())
         ));
-        boolean validEnvironmentVariable = MaidDriverSettings.isValidEnvironmentVariableName(
-                environmentVariableBox.getValue()
-        );
-        saveButton.active = validEnvironmentVariable && ClientPlayNetworking.canSend(MaidDriverSettingsPayload.TYPE);
-        sendButton.active = validEnvironmentVariable
-                && !messageBox.getValue().isBlank()
+        saveButton.active = ClientPlayNetworking.canSend(MaidDriverSettingsPayload.TYPE);
+        sendButton.active = !messageBox.getValue().isBlank()
                 && ClientPlayNetworking.canSend(MaidDialogueSubmitPayload.TYPE);
     }
 
     private void sendSettings() {
-        if (!MaidDriverSettings.isValidEnvironmentVariableName(environmentVariableBox.getValue())
-                || !ClientPlayNetworking.canSend(MaidDriverSettingsPayload.TYPE)) {
+        if (!ClientPlayNetworking.canSend(MaidDriverSettingsPayload.TYPE)) {
             return;
         }
         ClientPlayNetworking.send(new MaidDriverSettingsPayload(
                 data.maidId(),
-                selectedMode.serializedName(),
-                environmentVariableBox.getValue().strip()
+                selectedMode.serializedName()
         ));
     }
 
     private void submitMessage() {
         String message = messageBox.getValue().strip();
-        if (message.isEmpty() || !MaidDriverSettings.isValidEnvironmentVariableName(environmentVariableBox.getValue())) {
+        if (message.isEmpty()) {
             return;
         }
-        boolean settingsChanged = !selectedMode.serializedName().equals(data.driveMode())
-                || !environmentVariableBox.getValue().strip().equals(data.apiKeyEnvironmentVariable());
+        boolean settingsChanged = !selectedMode.serializedName().equals(data.driveMode());
         if (settingsChanged) {
             sendSettings();
         }

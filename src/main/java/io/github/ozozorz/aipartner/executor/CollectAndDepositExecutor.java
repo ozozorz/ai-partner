@@ -180,7 +180,6 @@ public final class CollectAndDepositExecutor {
 
     private void transitionTo(Phase nextPhase) {
         phase = nextPhase;
-        partner.logRuntimeEvent("composite_phase_" + nextPhase.name().toLowerCase());
     }
 
     private TaskContract requireContract() {

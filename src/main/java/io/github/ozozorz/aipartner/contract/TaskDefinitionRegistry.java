@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 保存 Job DSL 的唯一任务定义表，确保所有系统变体共享相同执行能力。
+ * 保存有限任务的唯一能力定义表，确保所有输入入口共享相同执行边界。
  */
 public final class TaskDefinitionRegistry {
     private static final Map<JobType, TaskDefinition> DEFINITIONS = createDefinitions();
@@ -36,47 +36,42 @@ public final class TaskDefinitionRegistry {
 
     private static Map<JobType, TaskDefinition> createDefinitions() {
         EnumMap<JobType, TaskDefinition> definitions = new EnumMap<>(JobType.class);
-        definitions.put(JobType.FOLLOW, parameterless(JobType.FOLLOW, true));
-        definitions.put(JobType.STAY, parameterless(JobType.STAY, true));
-        definitions.put(JobType.CANCEL, parameterless(JobType.CANCEL, true));
+        definitions.put(JobType.FOLLOW, parameterless(JobType.FOLLOW));
+        definitions.put(JobType.STAY, parameterless(JobType.STAY));
+        definitions.put(JobType.CANCEL, parameterless(JobType.CANCEL));
         Set<String> allowedLogs = Set.copyOf(AllowedTargets.suggestedBlockIds());
         definitions.put(JobType.COLLECT_BLOCK, bounded(
                 JobType.COLLECT_BLOCK,
-                true,
                 AllowedTargets.MAX_COLLECT_RADIUS,
                 allowedLogs
         ));
         definitions.put(JobType.DEPOSIT_ITEM, bounded(
                 JobType.DEPOSIT_ITEM,
-                true,
                 ContainerTargets.MAX_DEPOSIT_RADIUS,
                 allowedLogs
         ));
         definitions.put(JobType.COLLECT_AND_DEPOSIT, bounded(
                 JobType.COLLECT_AND_DEPOSIT,
-                true,
                 AllowedTargets.MAX_COLLECT_RADIUS,
                 allowedLogs
         ));
         definitions.put(JobType.TRANSFER_ITEM, bounded(
                 JobType.TRANSFER_ITEM,
-                true,
                 ContainerTargets.MAX_DEPOSIT_RADIUS,
                 Set.of("*")
         ));
         return definitions;
     }
 
-    private static TaskDefinition parameterless(JobType type, boolean implemented) {
-        return new TaskDefinition(type, implemented, false, 0, 0, 0, 0, Set.of());
+    private static TaskDefinition parameterless(JobType type) {
+        return new TaskDefinition(type, false, 0, 0, 0, 0, Set.of());
     }
 
     private static TaskDefinition bounded(
             JobType type,
-            boolean implemented,
             int maximumRadius,
             Set<String> allowedTargets
     ) {
-        return new TaskDefinition(type, implemented, true, 1, 64, 1, maximumRadius, allowedTargets);
+        return new TaskDefinition(type, true, 1, 64, 1, maximumRadius, allowedTargets);
     }
 }

@@ -12,7 +12,6 @@ import io.github.ozozorz.aipartner.inventory.EquipmentLease;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.storage.ValueInput;
-import net.minecraft.world.level.storage.ValueOutput;
 
 /**
  * 固定执行“采集后存放”的两阶段任务，阶段顺序不能由输入端改变。
@@ -151,20 +150,6 @@ public final class CollectAndDepositMaidTask implements MaidTask {
                 .putInt(DEPOSIT_MOVED_COUNT, input.getIntOr("DepositMovedCount", 0))
                 .putInt(TOOL_LEASE_SOURCE_SLOT, EquipmentLease.NO_SOURCE_SLOT)
                 .build();
-    }
-
-    @Override
-    public void writeLegacySnapshot(ValueOutput output, MaidTaskSnapshot snapshot) {
-        output.putString("CompositePhase", snapshot.string(
-                PHASE,
-                CollectAndDepositExecutor.Phase.COLLECTING.name()
-        ));
-        output.putInt(
-                "CollectInitialTargetCount",
-                snapshot.integer(COLLECT_INITIAL_TARGET_COUNT, 0)
-        );
-        output.putInt("CompositeCollectedCount", snapshot.integer(COLLECTED_COUNT, 0));
-        output.putInt("DepositMovedCount", snapshot.integer(DEPOSIT_MOVED_COUNT, 0));
     }
 
     @Override

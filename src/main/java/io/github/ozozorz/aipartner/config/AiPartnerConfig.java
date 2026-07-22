@@ -3,6 +3,7 @@ package io.github.ozozorz.aipartner.config;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import io.github.ozozorz.aipartner.AiPartnerMod;
+import io.github.ozozorz.aipartner.control.MaidDriverSettings;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -100,6 +101,9 @@ public record AiPartnerConfig(
             throw new IllegalArgumentException("Missing required AI Partner configuration fields");
         }
         LlmEndpointPolicy.validate(config.endpoint());
+        if (!MaidDriverSettings.isValidEnvironmentVariableName(config.apiKeyEnvironmentVariable())) {
+            throw new IllegalArgumentException("apiKeyEnvironmentVariable must be a valid server variable name");
+        }
         if (config.timeoutSeconds() < 1 || config.timeoutSeconds() > 120) {
             throw new IllegalArgumentException("timeoutSeconds must be between 1 and 120");
         }

@@ -30,7 +30,7 @@ public enum ManualDirective {
     }
 
     /**
-     * 把旧 Job DSL 中的长期任务映射为手动指令。
+     * 把有限任务入口中的长期行为类型映射为手动指令。
      */
     public static Optional<ManualDirective> fromJobType(JobType jobType) {
         return Arrays.stream(values())

@@ -84,8 +84,6 @@ public final class MaidGrowthController {
         output.putInt("WorkGrowthRewardsToday", workRewardsToday);
         output.putInt("CombatGrowthRewardsToday", combatRewardsToday);
         output.putInt("FoodGrowthRewardsToday", foodRewardsToday);
-        // 继续写旧字段，允许 v0.6/v0.7 工具读取喂食冷却。
-        output.putLong("LastFoodAffectionGameTime", lastFoodReward);
     }
 
     public void load(ValueInput input) {

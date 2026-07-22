@@ -3,7 +3,7 @@ package io.github.ozozorz.aipartner.control;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import net.minecraft.server.level.ServerPlayer;
 
-/** Compatibility facade for callers that submit one direct semantic action. */
+/** Small facade for callers that submit one direct semantic action. */
 public final class MaidControlService {
     private MaidControlService() {
     }

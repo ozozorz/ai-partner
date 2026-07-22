@@ -7,7 +7,6 @@ import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.entity.PartnerMode;
 import io.github.ozozorz.aipartner.executor.DepositItemExecutor;
 import net.minecraft.world.level.storage.ValueInput;
-import net.minecraft.world.level.storage.ValueOutput;
 
 /**
  * 把现有单箱存放状态机接入统一 MaidTask 生命周期。
@@ -93,11 +92,6 @@ public class DepositItemMaidTask implements MaidTask {
         return MaidTaskSnapshot.builder(1)
                 .putInt(MOVED_COUNT, input.getIntOr("DepositMovedCount", 0))
                 .build();
-    }
-
-    @Override
-    public void writeLegacySnapshot(ValueOutput output, MaidTaskSnapshot snapshot) {
-        output.putInt("DepositMovedCount", snapshot.integer(MOVED_COUNT, 0));
     }
 
     private static long fullTimeoutTicks(io.github.ozozorz.aipartner.contract.TaskContract contract) {

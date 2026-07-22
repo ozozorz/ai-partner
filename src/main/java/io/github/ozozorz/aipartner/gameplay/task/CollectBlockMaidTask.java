@@ -10,7 +10,6 @@ import io.github.ozozorz.aipartner.inventory.EquipmentLease;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.storage.ValueInput;
-import net.minecraft.world.level.storage.ValueOutput;
 
 /**
  * 把现有原木采集状态机接入统一 MaidTask 生命周期。
@@ -108,11 +107,6 @@ public final class CollectBlockMaidTask implements MaidTask {
                 .putInt(INITIAL_TARGET_COUNT, input.getIntOr("CollectInitialTargetCount", 0))
                 .putInt(TOOL_LEASE_SOURCE_SLOT, EquipmentLease.NO_SOURCE_SLOT)
                 .build();
-    }
-
-    @Override
-    public void writeLegacySnapshot(ValueOutput output, MaidTaskSnapshot snapshot) {
-        output.putInt("CollectInitialTargetCount", snapshot.integer(INITIAL_TARGET_COUNT, 0));
     }
 
     @Override

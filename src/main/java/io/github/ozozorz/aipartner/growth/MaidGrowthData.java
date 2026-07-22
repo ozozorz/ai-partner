@@ -48,10 +48,6 @@ public final class MaidGrowthData {
         return first;
     }
 
-    public long completedWorkMask() {
-        return completedWorkMask;
-    }
-
     public void save(ValueOutput output) {
         output.putInt("MaidAffection", affection);
         output.putInt("MaidGrowthExperience", experience);

@@ -1,7 +1,7 @@
 package io.github.ozozorz.aipartner.growth;
 
 /**
- * v0.8 的数据化成长曲线；所有工作在 1 级即可使用，等级只提供温和数值增益。
+ * 数据化成长曲线；所有工作在 1 级即可使用，等级只提供温和数值增益。
  */
 public final class MaidGrowthProgression {
     public static final int MAX_LEVEL = 20;

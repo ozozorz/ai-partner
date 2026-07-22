@@ -295,9 +295,18 @@ public final class MaidConversationService {
             case "workflow_replan_requested" -> submitWorkflowRequest(event, MaidLlmRequestKind.WORKFLOW_REPLAN);
             case "workflow_completed", "workflow_failed" ->
                     submitWorkflowRequest(event, MaidLlmRequestKind.WORKFLOW_OUTCOME);
+            case "workflow_cancelled" -> cancelWorkflowRequest(event.workflowId());
             default -> {
-                // Intermediate workflow evidence is consumed by the runtime and experiment observers.
+                // Intermediate evidence remains inside the authoritative workflow runtime.
             }
+        }
+    }
+
+    /** Stops a model call for a workflow that has already reached a cancelled terminal state. */
+    private static void cancelWorkflowRequest(UUID workflowId) {
+        WorkflowRequest request = WORKFLOW_REQUESTS.remove(workflowId);
+        if (request != null) {
+            request.future().cancel(true);
         }
     }
 
@@ -527,6 +536,13 @@ public final class MaidConversationService {
             WorkflowRequest request = entry.getValue();
             if (request.playerId().equals(playerId) && WORKFLOW_REQUESTS.remove(entry.getKey(), request)) {
                 request.future().cancel(true);
+                if (request.kind() == MaidLlmRequestKind.WORKFLOW_REPLAN) {
+                    request.event().partner().interruptWorkflow(
+                            request.event().workflowId(),
+                            request.event().actor(),
+                            "workflow_replan_request_cancelled"
+                    );
+                }
             }
         }
     }

@@ -17,17 +17,6 @@ class TaskDefinitionRegistryTest {
     }
 
     @Test
-    void currentMilestoneCapabilitiesAreExplicit() {
-        assertTrue(TaskDefinitionRegistry.get(JobType.FOLLOW).implemented());
-        assertTrue(TaskDefinitionRegistry.get(JobType.STAY).implemented());
-        assertTrue(TaskDefinitionRegistry.get(JobType.COLLECT_BLOCK).implemented());
-        assertTrue(TaskDefinitionRegistry.get(JobType.DEPOSIT_ITEM).implemented());
-        assertTrue(TaskDefinitionRegistry.get(JobType.CANCEL).implemented());
-        assertTrue(TaskDefinitionRegistry.get(JobType.COLLECT_AND_DEPOSIT).implemented());
-        assertTrue(TaskDefinitionRegistry.get(JobType.TRANSFER_ITEM).implemented());
-    }
-
-    @Test
     void collectDefinitionRejectsNonWhitelistedTarget() {
         TaskDefinition definition = TaskDefinitionRegistry.get(JobType.COLLECT_BLOCK);
 

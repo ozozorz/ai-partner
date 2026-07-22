@@ -7,7 +7,6 @@ import io.github.ozozorz.aipartner.combat.MaidCombatController;
 import io.github.ozozorz.aipartner.core.behavior.MaidBehaviorController;
 import io.github.ozozorz.aipartner.core.behavior.ManualDirective;
 import io.github.ozozorz.aipartner.core.task.MaidTaskRuntime;
-import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
 import io.github.ozozorz.aipartner.config.AiPartnerConfig;
 import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
 import io.github.ozozorz.aipartner.control.MaidDriveMode;
@@ -113,11 +112,6 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             AiPartnerEntity.class,
             EntityDataSerializers.INT
     );
-    private static final EntityDataAccessor<String> DATA_LLM_API_KEY_ENV = SynchedEntityData.defineId(
-            AiPartnerEntity.class,
-            EntityDataSerializers.STRING
-    );
-
     private final SimpleContainer inventory = new SimpleContainer(MaidInventoryPersistence.STORAGE_SLOT_COUNT);
     private final MaidConversationMemory conversationMemory = new MaidConversationMemory();
     private final MaidGrowthData growthData = new MaidGrowthData();
@@ -198,19 +192,16 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         builder.define(DATA_SPEECH_BUBBLE_UNTIL, 0L);
         builder.define(DATA_SKIN_HASH, "");
         builder.define(DATA_DRIVE_MODE, MaidDriveMode.LOCAL.ordinal());
-        builder.define(DATA_LLM_API_KEY_ENV, defaultApiKeyEnvironmentVariable());
     }
 
-    /**
-     * 由 MaidOrderService 调用，把已验证契约交给通用运行时。
-     */
+    /** 把语义动作注册表已验证的契约交给通用运行时。 */
     public void applyValidatedContract(
             TaskContract contract,
             ServerPlayer actor,
             String rawInstruction,
-            TaskExecutionPolicy executionPolicy
+            String sourceId
     ) {
-        taskRuntime.apply(contract, actor, rawInstruction, executionPolicy);
+        taskRuntime.apply(contract, actor, rawInstruction, sourceId);
     }
 
     /**
@@ -220,42 +211,16 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         taskRuntime.fail(failureCode);
     }
 
-    /**
-     * 由有限任务在目标谓词成立后完成当前契约。
-     */
-    public void completeActiveContract() {
-        taskRuntime.complete();
-    }
-
     public int getMaximumLocalRetries() {
         return taskRuntime.maximumLocalRetries();
     }
 
-    public boolean usesRuntimeMonitoring() {
-        return taskRuntime.runtimeMonitoringEnabled();
-    }
-
-    public boolean allowsLocalRecovery() {
-        return taskRuntime.localRecoveryEnabled();
-    }
-
-    public boolean tryRecordRuntimeRecovery(String reason) {
-        return taskRuntime.tryRecordRuntimeRecovery(reason);
-    }
-
-    public int getRuntimeRecoveryCount() {
-        return taskRuntime.runtimeRecoveryCount();
+    public boolean tryRecordRuntimeRecovery() {
+        return taskRuntime.tryRecordRuntimeRecovery();
     }
 
     public String activeExecutionState() {
         return taskRuntime.activeExecutionState();
-    }
-
-    /**
-     * 自动化扰动通过统一运行时取消原任务。
-     */
-    public void cancelActiveTaskForExperiment(ServerPlayer actor, String reason) {
-        taskRuntime.cancel(actor, reason);
     }
 
     /**
@@ -304,6 +269,11 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     /** Interrupts a workflow before an external mutating command or menu action is applied. */
     public void interruptActiveWorkflow(@Nullable ServerPlayer actor, String reason) {
         workflowRuntime.cancel(actor, reason);
+    }
+
+    /** Cancels one matching workflow without allowing stale model requests to cancel a replacement. */
+    public void interruptWorkflow(java.util.UUID workflowId, @Nullable ServerPlayer actor, String reason) {
+        workflowRuntime.cancel(workflowId, actor, reason);
     }
 
     /** Verifies that a workflow-scoped invocation belongs to the current runtime cursor. */
@@ -414,10 +384,6 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         workController.setMode(mode);
     }
 
-    public void cycleWorkMode() {
-        workController.cycleMode();
-    }
-
     public String getWorkExecutionState() {
         return workController.executionState();
     }
@@ -428,10 +394,6 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
 
     public void setCombatPolicy(CombatPolicy policy) {
         combatController.setPolicy(policy);
-    }
-
-    public void cycleCombatPolicy() {
-        combatController.cyclePolicy();
     }
 
     public boolean shouldUseRangedCombat() {
@@ -463,13 +425,6 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         if (!level().isClientSide() && isOwnedBy(player)) {
             behaviorController.setInventoryMenuOpen(false);
         }
-    }
-
-    /**
-     * 记录执行器内部状态事件，外围实验日志通过领域事件订阅。
-     */
-    public void logRuntimeEvent(String event) {
-        taskRuntime.logRuntimeEvent(event);
     }
 
     @Override
@@ -555,46 +510,6 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             player.getInventory().placeItemBackInInventory(stack);
         }
         return returned;
-    }
-
-    public void resetForExperiment(ServerPlayer actor) {
-        resetForExperiment(actor, true);
-    }
-
-    /**
-     * 清除受控场景状态，并按调用方要求归还或丢弃场景物品。
-     */
-    public void resetForExperiment(ServerPlayer actor, boolean returnContentsToPlayer) {
-        if (level().isClientSide()) {
-            throw new IllegalStateException("Experiment reset may only run on the server");
-        }
-        workflowRuntime.cancel(actor, "experiment_reset");
-        taskRuntime.resetForExperiment(actor);
-        for (ItemStack stack : inventory.removeAllItems()) {
-            if (returnContentsToPlayer) {
-                actor.getInventory().placeItemBackInInventory(stack);
-            }
-        }
-        for (EquipmentSlot slot : new EquipmentSlot[]{
-                EquipmentSlot.MAINHAND,
-                EquipmentSlot.OFFHAND,
-                EquipmentSlot.HEAD,
-                EquipmentSlot.CHEST,
-                EquipmentSlot.LEGS,
-                EquipmentSlot.FEET
-        }) {
-            ItemStack equipped = getItemBySlot(slot);
-            if (!equipped.isEmpty()) {
-                setItemSlot(slot, ItemStack.EMPTY);
-                if (returnContentsToPlayer) {
-                    actor.getInventory().placeItemBackInInventory(equipped);
-                }
-            }
-        }
-        behaviorController.setInventoryMenuOpen(false);
-        workController.setMode(MaidWorkMode.NONE);
-        combatController.setPolicy(CombatPolicy.OFF);
-        setHealth(getMaxHealth());
     }
 
     @Override
@@ -807,7 +722,6 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             output.putString("MaidSkinHash", getSkinHash());
         }
         output.putString("MaidDriveMode", getDriveMode().serializedName());
-        output.putString("MaidLlmApiKeyEnvironmentVariable", getLlmApiKeyEnvironmentVariable());
     }
 
     @Override
@@ -834,13 +748,6 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         appliedGrowthLevel = -1;
         setSkinHash(input.getStringOr("MaidSkinHash", ""));
         setDriveMode(MaidDriveMode.fromSavedName(input.getStringOr("MaidDriveMode", "local")));
-        String environmentVariable = input.getStringOr(
-                "MaidLlmApiKeyEnvironmentVariable",
-                defaultApiKeyEnvironmentVariable()
-        );
-        setLlmApiKeyEnvironmentVariable(MaidDriverSettings.isValidEnvironmentVariableName(environmentVariable)
-                ? environmentVariable
-                : defaultApiKeyEnvironmentVariable());
         ownershipRegistered = false;
     }
 
@@ -935,17 +842,9 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         entityData.set(DATA_DRIVE_MODE, java.util.Objects.requireNonNull(mode, "mode").ordinal());
     }
 
-    /** Returns an environment variable name, never the API key stored under that name. */
+    /** Returns the server-owned credential variable name, never the secret stored under it. */
     public String getLlmApiKeyEnvironmentVariable() {
-        return entityData.get(DATA_LLM_API_KEY_ENV);
-    }
-
-    /** Persists only a validated environment variable identifier. */
-    public void setLlmApiKeyEnvironmentVariable(String variableName) {
-        entityData.set(
-                DATA_LLM_API_KEY_ENV,
-                MaidDriverSettings.requireEnvironmentVariableName(variableName)
-        );
+        return defaultApiKeyEnvironmentVariable();
     }
 
     /**
@@ -971,6 +870,5 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             spawnAtLocation(level, stack);
         }
         pendingMigrationDrops.clear();
-        logRuntimeEvent("inventory_migration_overflow_dropped");
     }
 }
