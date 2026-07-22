@@ -42,6 +42,8 @@ public final class DepositItemContractValidator implements TaskContractValidator
             return ContractDecision.rejected(FailureCode.CONTAINER_FULL, "message.ai-partner.container_full");
         }
         return ContractAcceptance.accept(
+                partner,
+                player,
                 candidate,
                 List.of("owner_is_online", "item_is_allowed", "maid_has_requested_quantity", "accessible_chest_exists"),
                 List.of("container_item_delta(" + candidate.target() + ") >= " + candidate.quantity()),

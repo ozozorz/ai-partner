@@ -80,7 +80,9 @@ public final class DepositItemExecutor {
             listener.onFailed(FailureCode.INTERNAL_ERROR);
             return;
         }
-        origin = partner.blockPosition().immutable();
+        origin = taskContract.executionAnchor().bound()
+                ? BlockPos.of(taskContract.executionAnchor().originPosition())
+                : partner.blockPosition().immutable();
         movedCount = Math.max(0, initialMovedCount);
         long fullTimeoutTicks = taskContract.failurePolicy().timeoutSeconds() * 20L;
         if (remainingTimeoutOverride == null) {

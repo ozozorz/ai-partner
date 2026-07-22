@@ -54,6 +54,8 @@ public final class CollectAndDepositContractValidator implements TaskContractVal
             return ContractDecision.rejected(FailureCode.CONTAINER_FULL, "message.ai-partner.container_full");
         }
         return ContractAcceptance.accept(
+                partner,
+                player,
                 candidate,
                 List.of(
                         "owner_is_online",

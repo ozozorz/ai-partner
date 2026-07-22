@@ -20,6 +20,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import org.jspecify.annotations.Nullable;
@@ -33,6 +35,7 @@ public final class MaidControlLlmGateway {
     private static final String PROMPT_RESOURCE = "/assets/ai-partner/prompts/maid_control_system.txt";
     private static final String SCHEMA_RESOURCE = "/assets/ai-partner/schema/maid_control.schema.json";
     private static final int MAX_CAPTURED_OUTPUT_LENGTH = 16_384;
+    private static final int MAX_PROTOCOL_REPAIR_ATTEMPTS = 1;
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
 
     private final AiPartnerConfig config;
@@ -86,7 +89,32 @@ public final class MaidControlLlmGateway {
             MaidControlContextSnapshot context,
             String apiKeyEnvironmentVariable
     ) {
+        return request(
+                MaidLlmRequestKind.PLAYER_MESSAGE,
+                playerMessage,
+                context,
+                List.of(),
+                null,
+                apiKeyEnvironmentVariable
+        );
+    }
+
+    /**
+     * Sends a player turn, workflow replan, or grounded outcome narration request with bounded history.
+     */
+    public CompletableFuture<MaidControlLlmResult> request(
+            MaidLlmRequestKind requestKind,
+            String playerMessage,
+            MaidControlContextSnapshot context,
+            List<MaidConversationMessage> history,
+            @Nullable MaidWorkflowFeedback workflowFeedback,
+            String apiKeyEnvironmentVariable
+    ) {
         long startedNanos = System.nanoTime();
+        MaidLlmRequestKind trustedRequestKind = Objects.requireNonNull(requestKind, "requestKind");
+        String boundedPlayerMessage = Objects.requireNonNullElse(playerMessage, "");
+        MaidControlContextSnapshot trustedContext = Objects.requireNonNull(context, "context");
+        List<MaidConversationMessage> boundedHistory = List.copyOf(history);
         String readinessError = readinessError(apiKeyEnvironmentVariable);
         if (readinessError != null) {
             return CompletableFuture.completedFuture(MaidControlLlmResult.failed(
@@ -98,7 +126,45 @@ public final class MaidControlLlmGateway {
             ));
         }
 
-        String requestBody = createRequestBody(playerMessage, context);
+        String requestBody = createRequestBody(
+                trustedRequestKind,
+                boundedPlayerMessage,
+                trustedContext,
+                boundedHistory,
+                workflowFeedback,
+                false
+        );
+        return executeRequest(requestBody, apiKeyEnvironmentVariable, startedNanos)
+                .thenCompose(firstResult -> {
+                    if (!requiresProtocolRepair(trustedRequestKind, firstResult)) {
+                        return CompletableFuture.completedFuture(
+                                enforceRequestKind(trustedRequestKind, firstResult)
+                        );
+                    }
+                    String repairBody = createRequestBody(
+                            trustedRequestKind,
+                            boundedPlayerMessage,
+                            trustedContext,
+                            boundedHistory,
+                            workflowFeedback,
+                            true
+                    );
+                    return executeRequest(repairBody, apiKeyEnvironmentVariable, startedNanos)
+                            .thenApply(secondResult -> aggregateProtocolAttempts(
+                                    trustedRequestKind,
+                                    firstResult,
+                                    secondResult,
+                                    startedNanos
+                            ));
+                });
+    }
+
+    /** Executes one HTTP/model attempt group; transport retries remain separate from protocol repair. */
+    private CompletableFuture<MaidControlLlmResult> executeRequest(
+            String requestBody,
+            String apiKeyEnvironmentVariable,
+            long startedNanos
+    ) {
         return sendWithRetry(requestBody, apiKeyEnvironmentVariable, 0)
                 .handle((attemptedResponse, throwable) -> {
                     long latencyMillis = Duration.ofNanos(System.nanoTime() - startedNanos).toMillis();
@@ -121,6 +187,58 @@ public final class MaidControlLlmGateway {
                             attemptedResponse.attempts()
                     );
                 });
+    }
+
+    private static boolean requiresProtocolRepair(
+            MaidLlmRequestKind requestKind,
+            MaidControlLlmResult result
+    ) {
+        if (MAX_PROTOCOL_REPAIR_ATTEMPTS == 0 || requestKind == MaidLlmRequestKind.PLAYER_MESSAGE) {
+            return false;
+        }
+        if (!result.successful()) {
+            return "INVALID_MODEL_OUTPUT".equals(result.errorCode());
+        }
+        return result.interpretation() == null || !requestKind.accepts(result.interpretation());
+    }
+
+    private static MaidControlLlmResult aggregateProtocolAttempts(
+            MaidLlmRequestKind requestKind,
+            MaidControlLlmResult firstResult,
+            MaidControlLlmResult secondResult,
+            long startedNanos
+    ) {
+        MaidControlLlmResult enforced = enforceRequestKind(requestKind, secondResult);
+        return new MaidControlLlmResult(
+                enforced.successful(),
+                enforced.interpretation(),
+                enforced.rawOutput(),
+                enforced.model(),
+                Duration.ofNanos(System.nanoTime() - startedNanos).toMillis(),
+                firstResult.attempts() + secondResult.attempts(),
+                firstResult.inputTokens() + secondResult.inputTokens(),
+                firstResult.outputTokens() + secondResult.outputTokens(),
+                enforced.errorCode()
+        );
+    }
+
+    /** Enforces the request-kind contract even when the generic v3 JSON schema was valid. */
+    private static MaidControlLlmResult enforceRequestKind(
+            MaidLlmRequestKind requestKind,
+            MaidControlLlmResult result
+    ) {
+        if (!result.successful()
+                || result.interpretation() == null
+                || requestKind.accepts(result.interpretation())) {
+            return result;
+        }
+        return MaidControlLlmResult.failed(
+                result.model(),
+                result.latencyMillis(),
+                result.attempts(),
+                result.rawOutput(),
+                "PROTOCOL_KIND_MISMATCH"
+        );
     }
 
     private CompletableFuture<AttemptedResponse> sendWithRetry(
@@ -164,13 +282,50 @@ public final class MaidControlLlmGateway {
                 .thenCompose(future -> future);
     }
 
-    private String createRequestBody(String playerMessage, MaidControlContextSnapshot context) {
+    private String createRequestBody(
+            MaidLlmRequestKind requestKind,
+            String playerMessage,
+            MaidControlContextSnapshot context,
+            List<MaidConversationMessage> history,
+            @Nullable MaidWorkflowFeedback workflowFeedback,
+            boolean protocolRepairAttempt
+    ) {
         JsonObject untrustedInput = new JsonObject();
+        untrustedInput.addProperty("request_kind_server_authoritative", requestKind.name());
         untrustedInput.addProperty("player_message_untrusted", playerMessage);
         untrustedInput.add("server_authoritative_context", GSON.toJsonTree(context));
+        if (workflowFeedback != null) {
+            untrustedInput.add("server_authoritative_workflow_feedback", GSON.toJsonTree(workflowFeedback));
+        }
+        JsonObject responseContract = new JsonObject();
+        if (requestKind.requiredDialogueAct() != null) {
+            responseContract.addProperty(
+                    "required_dialogue_act",
+                    requestKind.requiredDialogueAct().name()
+            );
+        }
+        responseContract.addProperty("minimum_plan_steps", requestKind.minimumPlanSteps());
+        responseContract.addProperty("maximum_plan_steps", requestKind.maximumPlanSteps());
+        responseContract.addProperty("protocol_repair_attempt", protocolRepairAttempt);
+        responseContract.addProperty(
+                "purpose",
+                switch (requestKind) {
+                    case PLAYER_MESSAGE -> "Interpret the current player turn.";
+                    case WORKFLOW_REPLAN ->
+                            "Return only a safe replacement plan based on authoritative failure evidence.";
+                    case WORKFLOW_OUTCOME ->
+                            "Narrate only the authoritative outcome; do not propose or repeat actions.";
+                }
+        );
+        untrustedInput.add("server_authoritative_response_contract", responseContract);
 
         JsonArray messages = new JsonArray();
         messages.add(message("system", systemPrompt));
+        int firstHistoryIndex = Math.max(0, history.size() - 12);
+        for (int index = firstHistoryIndex; index < history.size(); index++) {
+            MaidConversationMessage prior = history.get(index);
+            messages.add(message(prior.role(), prior.content()));
+        }
         messages.add(message("user", GSON.toJson(untrustedInput)));
 
         JsonObject request = new JsonObject();

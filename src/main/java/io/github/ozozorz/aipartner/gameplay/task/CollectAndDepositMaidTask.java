@@ -21,6 +21,7 @@ public final class CollectAndDepositMaidTask implements MaidTask {
     public static final String ID = "collect_and_deposit";
     private static final String PHASE = "phase";
     private static final String COLLECT_INITIAL_TARGET_COUNT = "collectInitialTargetCount";
+    private static final String COLLECTED_COUNT = "collectedCount";
     private static final String DEPOSIT_MOVED_COUNT = "depositMovedCount";
     private static final String TOOL_LEASE_SOURCE_SLOT = "toolLeaseSourceSlot";
     private static final String REMAINING_TIMEOUT_TICKS = "remainingTimeoutTicks";
@@ -66,6 +67,7 @@ public final class CollectAndDepositMaidTask implements MaidTask {
                 context.contract(),
                 savedPhase,
                 snapshot.integer(COLLECT_INITIAL_TARGET_COUNT, 0),
+                restoredCollectedCount(context, snapshot, savedPhase),
                 snapshot.integer(DEPOSIT_MOVED_COUNT, 0),
                 snapshot.longValue(REMAINING_TIMEOUT_TICKS, fullTimeoutTicks(context.contract())),
                 new ExecutorResultAdapter(context.resultSink())
@@ -127,6 +129,7 @@ public final class CollectAndDepositMaidTask implements MaidTask {
         return MaidTaskSnapshot.builder(2)
                 .putString(PHASE, executor.phase().name())
                 .putInt(COLLECT_INITIAL_TARGET_COUNT, executor.collectInitialTargetCount())
+                .putInt(COLLECTED_COUNT, executor.collectedCount())
                 .putInt(DEPOSIT_MOVED_COUNT, executor.depositMovedCount())
                 .putLong(REMAINING_TIMEOUT_TICKS, executor.remainingTimeoutTicks())
                 .putInt(
@@ -144,6 +147,7 @@ public final class CollectAndDepositMaidTask implements MaidTask {
                         CollectAndDepositExecutor.Phase.COLLECTING.name()
                 ))
                 .putInt(COLLECT_INITIAL_TARGET_COUNT, input.getIntOr("CollectInitialTargetCount", 0))
+                .putInt(COLLECTED_COUNT, input.getIntOr("CompositeCollectedCount", -1))
                 .putInt(DEPOSIT_MOVED_COUNT, input.getIntOr("DepositMovedCount", 0))
                 .putInt(TOOL_LEASE_SOURCE_SLOT, EquipmentLease.NO_SOURCE_SLOT)
                 .build();
@@ -159,6 +163,7 @@ public final class CollectAndDepositMaidTask implements MaidTask {
                 "CollectInitialTargetCount",
                 snapshot.integer(COLLECT_INITIAL_TARGET_COUNT, 0)
         );
+        output.putInt("CompositeCollectedCount", snapshot.integer(COLLECTED_COUNT, 0));
         output.putInt("DepositMovedCount", snapshot.integer(DEPOSIT_MOVED_COUNT, 0));
     }
 
@@ -181,5 +186,19 @@ public final class CollectAndDepositMaidTask implements MaidTask {
 
     private static long fullTimeoutTicks(io.github.ozozorz.aipartner.contract.TaskContract contract) {
         return contract.failurePolicy().timeoutSeconds() * 20L;
+    }
+
+    private static int restoredCollectedCount(
+            MaidTaskContext context,
+            MaidTaskSnapshot snapshot,
+            CollectAndDepositExecutor.Phase savedPhase
+    ) {
+        int persisted = snapshot.integer(COLLECTED_COUNT, -1);
+        if (persisted >= 0) {
+            return persisted;
+        }
+        return savedPhase == CollectAndDepositExecutor.Phase.DEPOSITING
+                ? context.contract().job().quantity()
+                : 0;
     }
 }

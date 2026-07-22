@@ -9,16 +9,16 @@ import io.github.ozozorz.aipartner.job.JobType;
 import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import org.junit.jupiter.api.Test;
 
-/** Verifies that the gameplay LLM boundary only accepts the strict v2 intent protocol. */
+/** Verifies the strict v3 boundary that combines natural dialogue with a bounded action plan. */
 class MaidControlJsonCodecTest {
     @Test
-    void decodesPersistentWorkIntent() {
+    void decodesDialogueAndPersistentWorkPlan() {
         MaidControlInterpretation result = MaidControlJsonCodec.decode("""
                 {
-                  "schema_version": "2.0",
-                  "dialogue_act": "PROPOSE_INTENT",
-                  "intent": {"kind": "SET_WORK_MODE", "mode": "lumberjack"},
-                  "response_text": null
+                  "schema_version": "3.0",
+                  "dialogue_act": "PROPOSE_PLAN",
+                  "plan": [{"kind": "SET_WORK_MODE", "mode": "lumberjack"}],
+                  "response_text": "I will start tending the nearby trees."
                 }
                 """);
 
@@ -27,46 +27,40 @@ class MaidControlJsonCodecTest {
                 result.intent()
         );
         assertEquals(MaidWorkMode.LUMBERJACK, intent.mode());
+        assertEquals("I will start tending the nearby trees.", result.responseText());
     }
 
     @Test
-    void decodesBoundedTaskAndQuery() {
-        MaidControlInterpretation taskResult = MaidControlJsonCodec.decode("""
-                {
-                  "schema_version": "2.0",
-                  "dialogue_act": "PROPOSE_INTENT",
-                  "intent": {
-                    "kind": "RUN_TASK",
-                    "job_type": "COLLECT_BLOCK",
-                    "target": "minecraft:oak_log",
-                    "quantity": 8,
-                    "radius": 16
-                  },
-                  "response_text": null
-                }
-                """);
-        MaidControlIntent.RunTask task = assertInstanceOf(MaidControlIntent.RunTask.class, taskResult.intent());
-        assertEquals(JobType.COLLECT_BLOCK, task.job().type());
-        assertEquals(8, task.job().quantity());
-
-        MaidControlInterpretation queryResult = MaidControlJsonCodec.decode("""
-                {
-                  "schema_version": "2.0",
-                  "dialogue_act": "PROPOSE_INTENT",
-                  "intent": {"kind": "QUERY_STATUS"},
-                  "response_text": null
-                }
-                """);
-        assertInstanceOf(MaidControlIntent.QueryStatus.class, queryResult.intent());
-    }
-
-    @Test
-    void decodesClarificationWithoutIntent() {
+    void decodesOrderedMultiStepPlan() {
         MaidControlInterpretation result = MaidControlJsonCodec.decode("""
                 {
-                  "schema_version": "2.0",
+                  "schema_version": "3.0",
+                  "dialogue_act": "PROPOSE_PLAN",
+                  "plan": [
+                    {"kind":"SET_WORK_MODE","mode":"none"},
+                    {"kind":"RUN_TASK","job_type":"COLLECT_BLOCK","target":"minecraft:oak_log","quantity":8,"radius":16},
+                    {"kind":"RUN_TASK","job_type":"DEPOSIT_ITEM","target":"minecraft:oak_log","quantity":8,"radius":16}
+                  ],
+                  "response_text": "I will stop my routine, collect eight logs, then store them."
+                }
+                """);
+
+        assertEquals(3, result.plan().size());
+        MaidControlIntent.RunTask collect = assertInstanceOf(
+                MaidControlIntent.RunTask.class,
+                result.plan().get(1)
+        );
+        assertEquals(JobType.COLLECT_BLOCK, collect.job().type());
+        assertEquals(8, collect.job().quantity());
+    }
+
+    @Test
+    void decodesClarificationWithoutPlan() {
+        MaidControlInterpretation result = MaidControlJsonCodec.decode("""
+                {
+                  "schema_version": "3.0",
                   "dialogue_act": "ASK_CLARIFICATION",
-                  "intent": null,
+                  "plan": [],
                   "response_text": "Which item should I move?"
                 }
                 """);
@@ -77,28 +71,33 @@ class MaidControlJsonCodecTest {
     }
 
     @Test
-    void rejectsArbitraryFieldsAndInvalidBasicParameters() {
+    void persistedIntentRoundTripsThroughSameWhitelist() {
+        MaidControlIntent original = new MaidControlIntent.RunTask(
+                new io.github.ozozorz.aipartner.contract.JobSpec(
+                        JobType.COLLECT_AND_DEPOSIT,
+                        "minecraft:birch_log",
+                        5,
+                        12
+                )
+        );
+
+        MaidControlIntent restored = MaidControlJsonCodec.decodePersistedIntent(
+                MaidControlJsonCodec.encodeIntent(original)
+        );
+
+        assertEquals(original, restored);
+    }
+
+    @Test
+    void rejectsArbitraryFieldsInvalidParametersAndUnboundedPlans() {
         assertThrows(IllegalArgumentException.class, () -> MaidControlJsonCodec.decode("""
-                {
-                  "schema_version": "2.0",
-                  "dialogue_act": "PROPOSE_INTENT",
-                  "intent": {"kind": "QUERY_STATUS", "command": "/op @s"},
-                  "response_text": null
-                }
+                {"schema_version":"3.0","dialogue_act":"PROPOSE_PLAN","plan":[{"kind":"QUERY_STATUS","command":"/op @s"}],"response_text":"Checking."}
                 """));
         assertThrows(IllegalArgumentException.class, () -> MaidControlJsonCodec.decode("""
-                {
-                  "schema_version": "2.0",
-                  "dialogue_act": "PROPOSE_INTENT",
-                  "intent": {
-                    "kind": "RUN_TASK",
-                    "job_type": "FOLLOW",
-                    "target": "minecraft:diamond",
-                    "quantity": 1,
-                    "radius": 16
-                  },
-                  "response_text": null
-                }
+                {"schema_version":"3.0","dialogue_act":"PROPOSE_PLAN","plan":[{"kind":"RUN_TASK","job_type":"FOLLOW","target":"minecraft:diamond","quantity":1,"radius":16}],"response_text":"Following."}
+                """));
+        assertThrows(IllegalArgumentException.class, () -> MaidControlJsonCodec.decode("""
+                {"schema_version":"3.0","dialogue_act":"PROPOSE_PLAN","plan":[{"kind":"QUERY_STATUS"},{"kind":"QUERY_STATUS"},{"kind":"QUERY_STATUS"},{"kind":"QUERY_STATUS"},{"kind":"QUERY_STATUS"},{"kind":"QUERY_STATUS"},{"kind":"QUERY_STATUS"}],"response_text":"Checking."}
                 """));
     }
 
@@ -106,16 +105,11 @@ class MaidControlJsonCodecTest {
     void rejectsMarkdownAndDialoguePayloadMismatch() {
         assertThrows(IllegalArgumentException.class, () -> MaidControlJsonCodec.decode("""
                 ```json
-                {"schema_version":"2.0"}
+                {"schema_version":"3.0"}
                 ```
                 """));
         assertThrows(IllegalArgumentException.class, () -> MaidControlJsonCodec.decode("""
-                {
-                  "schema_version": "2.0",
-                  "dialogue_act": "SOCIAL_REPLY",
-                  "intent": {"kind": "QUERY_STATUS"},
-                  "response_text": "Hello"
-                }
+                {"schema_version":"3.0","dialogue_act":"SOCIAL_REPLY","plan":[{"kind":"QUERY_STATUS"}],"response_text":"Hello"}
                 """));
     }
 }

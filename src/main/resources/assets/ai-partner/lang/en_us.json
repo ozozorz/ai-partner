@@ -225,5 +225,9 @@
   "gui.ai-partner.dialogue.readiness.llm_disabled": "LLM is disabled in config/ai-partner.json.",
   "gui.ai-partner.dialogue.readiness.model_not_configured": "No LLM model is configured.",
   "gui.ai-partner.dialogue.readiness.invalid_api_key_env": "The API key environment variable name is invalid.",
-  "gui.ai-partner.dialogue.readiness.missing_api_key_env": "The selected API key environment variable is not set."
+  "gui.ai-partner.dialogue.readiness.missing_api_key_env": "The selected API key environment variable is not set.",
+  "message.ai-partner.workflow_completed": "The bounded workflow completed according to the server result.",
+  "message.ai-partner.workflow_failed": "The bounded workflow failed with server result: %s.",
+  "message.ai-partner.workflow_completed_dialogue": "[Verified complete] %s",
+  "message.ai-partner.workflow_failed_dialogue": "[Verified failure: %1$s] %2$s"
 }

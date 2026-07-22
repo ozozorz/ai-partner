@@ -12,6 +12,7 @@ import io.github.ozozorz.aipartner.config.AiPartnerConfig;
 import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
 import io.github.ozozorz.aipartner.control.MaidDriveMode;
 import io.github.ozozorz.aipartner.control.MaidDriverSettings;
+import io.github.ozozorz.aipartner.conversation.MaidConversationMemory;
 import io.github.ozozorz.aipartner.entity.goal.AiPartnerFollowOwnerGoal;
 import io.github.ozozorz.aipartner.entity.goal.AiPartnerIdleWanderGoal;
 import io.github.ozozorz.aipartner.entity.goal.AiPartnerMeleeCombatGoal;
@@ -33,6 +34,9 @@ import io.github.ozozorz.aipartner.registry.ModTasks;
 import io.github.ozozorz.aipartner.service.PartnerService;
 import io.github.ozozorz.aipartner.work.MaidWorkController;
 import io.github.ozozorz.aipartner.work.MaidWorkMode;
+import io.github.ozozorz.aipartner.workflow.MaidWorkflowRuntime;
+import io.github.ozozorz.aipartner.workflow.MaidWorkflowSpec;
+import io.github.ozozorz.aipartner.workflow.MaidWorkflowStartResult;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleActivity;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
 import java.util.ArrayList;
@@ -115,6 +119,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     );
 
     private final SimpleContainer inventory = new SimpleContainer(MaidInventoryPersistence.STORAGE_SLOT_COUNT);
+    private final MaidConversationMemory conversationMemory = new MaidConversationMemory();
     private final MaidGrowthData growthData = new MaidGrowthData();
     private final MaidGrowthController growthController = new MaidGrowthController(this, growthData);
     private final MaidBehaviorController behaviorController = new MaidBehaviorController(this);
@@ -123,6 +128,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             behaviorController,
             ModTasks.createRegistry()
     );
+    private final MaidWorkflowRuntime workflowRuntime = new MaidWorkflowRuntime(this, taskRuntime);
     private final MaidGameplayConfig gameplayConfig = MaidGameplayConfig.get();
     private final MaidLifeController lifeController = new MaidLifeController(
             this,
@@ -276,6 +282,48 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         return taskRuntime.currentContract();
     }
 
+    /** Starts a server-owned bounded sequence of existing semantic actions. */
+    public MaidWorkflowStartResult startWorkflow(MaidWorkflowSpec spec, ServerPlayer actor) {
+        return workflowRuntime.start(spec, actor);
+    }
+
+    /** Applies an asynchronously generated replacement plan to the same workflow contract. */
+    public boolean applyWorkflowReplan(
+            java.util.UUID workflowId,
+            java.util.List<io.github.ozozorz.aipartner.control.MaidControlIntent> replacement,
+            ServerPlayer actor
+    ) {
+        return workflowRuntime.applyReplan(workflowId, replacement, actor);
+    }
+
+    /** Fails a workflow when its single authorized replan cannot be obtained safely. */
+    public void rejectWorkflowReplan(java.util.UUID workflowId, String detail) {
+        workflowRuntime.rejectReplan(workflowId, detail);
+    }
+
+    /** Interrupts a workflow before an external mutating command or menu action is applied. */
+    public void interruptActiveWorkflow(@Nullable ServerPlayer actor, String reason) {
+        workflowRuntime.cancel(actor, reason);
+    }
+
+    /** Verifies that a workflow-scoped invocation belongs to the current runtime cursor. */
+    public boolean acceptsWorkflowInvocation(java.util.UUID workflowId) {
+        return workflowRuntime.acceptsInvocation(workflowId);
+    }
+
+    public boolean hasActiveWorkflow() {
+        return workflowRuntime.hasActiveWorkflow();
+    }
+
+    public String workflowSummary() {
+        return workflowRuntime.summary();
+    }
+
+    /** Returns the bounded dialogue memory used for continuity and entity persistence. */
+    public MaidConversationMemory conversationMemory() {
+        return conversationMemory;
+    }
+
     public boolean canUseAmbientMovement() {
         return taskRuntime.canUseAmbientMovement()
                 && lifeController.canUseAmbientMovement()
@@ -295,6 +343,11 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
      */
     public void onManualDirectiveActivated(ManualDirective directive) {
         lifeController.onManualDirectiveActivated(directive);
+    }
+
+    /** Exposes the authoritative manual directive for action postcondition verification. */
+    public ManualDirective getManualDirective() {
+        return behaviorController.manualDirective();
     }
 
     public void requestReturnHome(ServerPlayer actor) {
@@ -515,6 +568,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         if (level().isClientSide()) {
             throw new IllegalStateException("Experiment reset may only run on the server");
         }
+        workflowRuntime.cancel(actor, "experiment_reset");
         taskRuntime.resetForExperiment(actor);
         for (ItemStack stack : inventory.removeAllItems()) {
             if (returnContentsToPlayer) {
@@ -548,6 +602,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         super.tick();
         combatController.tick();
         taskRuntime.tick();
+        workflowRuntime.tick();
         lifeController.tick();
         workController.tick();
         pickupController.tick();
@@ -740,7 +795,9 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     protected void addAdditionalSaveData(ValueOutput output) {
         super.addAdditionalSaveData(output);
         MaidInventoryPersistence.save(inventory, output);
+        conversationMemory.save(output);
         taskRuntime.save(output);
+        workflowRuntime.save(output);
         lifeController.save(output);
         workController.save(output);
         combatController.save(output);
@@ -766,7 +823,9 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         setItemSlot(EquipmentSlot.MAINHAND, inventoryLoad.mainHand());
         pendingMigrationDrops.clear();
         pendingMigrationDrops.addAll(inventoryLoad.overflow());
+        conversationMemory.load(input);
         taskRuntime.load(input);
+        workflowRuntime.load(input);
         lifeController.load(input);
         workController.load(input);
         combatController.load(input);

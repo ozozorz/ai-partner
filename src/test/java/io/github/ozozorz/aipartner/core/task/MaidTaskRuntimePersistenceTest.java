@@ -41,7 +41,12 @@ class MaidTaskRuntimePersistenceTest {
                 List.of("owner_is_online", "inventory_has_capacity(8)"),
                 List.of("maid_inventory_delta(minecraft:oak_log) >= 8"),
                 List.of("only_break_target_block", "distance_from_origin <= 16"),
-                new TaskContract.FailurePolicy(3, 0, 120)
+                new TaskContract.FailurePolicy(3, 0, 120),
+                TaskContract.ExecutionAnchor.bound(
+                        java.util.UUID.randomUUID(),
+                        "minecraft:overworld",
+                        net.minecraft.core.BlockPos.asLong(12, 64, -4)
+                )
         );
         contract.markRunning();
         TagValueOutput output = TagValueOutput.createWithoutContext(ProblemReporter.DISCARDING);
@@ -55,6 +60,7 @@ class MaidTaskRuntimePersistenceTest {
         assertEquals(contract.goalPredicates(), restored.goalPredicates());
         assertEquals(contract.invariants(), restored.invariants());
         assertEquals(contract.failurePolicy(), restored.failurePolicy());
+        assertEquals(contract.executionAnchor(), restored.executionAnchor());
         assertEquals(ContractStatus.RUNNING, restored.status());
         assertEquals(FailureCode.NONE, restored.failureCode());
     }

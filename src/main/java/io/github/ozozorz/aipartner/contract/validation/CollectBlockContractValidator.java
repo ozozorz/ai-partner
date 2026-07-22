@@ -39,6 +39,8 @@ public final class CollectBlockContractValidator implements TaskContractValidato
             return ContractDecision.rejected(FailureCode.TARGET_NOT_FOUND, "message.ai-partner.target_not_found");
         }
         return ContractAcceptance.accept(
+                partner,
+                player,
                 candidate,
                 List.of(
                         "owner_is_online",

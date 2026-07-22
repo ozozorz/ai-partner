@@ -1,5 +1,6 @@
 package io.github.ozozorz.aipartner.control;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
@@ -10,24 +11,26 @@ import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
 import io.github.ozozorz.aipartner.job.JobType;
 import io.github.ozozorz.aipartner.life.ActivityLocationType;
 import io.github.ozozorz.aipartner.work.MaidWorkMode;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 
-/** Decodes the strict v2 LLM protocol into the same typed intents used by local control. */
+/** Strict codec for the v3 dialogue-plus-bounded-workflow LLM protocol. */
 public final class MaidControlJsonCodec {
-    public static final String SCHEMA_VERSION = "2.0";
+    public static final String SCHEMA_VERSION = "3.0";
     private static final int MAX_RESPONSE_LENGTH = 240;
     private static final Set<String> ROOT_FIELDS = Set.of(
             "schema_version",
             "dialogue_act",
-            "intent",
+            "plan",
             "response_text"
     );
 
     private MaidControlJsonCodec() {
     }
 
-    /** Rejects markdown, missing fields, extra fields, invalid enums, and out-of-range values. */
+    /** Rejects markdown, missing or extra fields, invalid enums, and unbounded plans. */
     public static MaidControlInterpretation decode(String rawJson) {
         try {
             JsonElement rootElement = JsonParser.parseString(rawJson);
@@ -39,68 +42,105 @@ public final class MaidControlJsonCodec {
             if (!SCHEMA_VERSION.equals(requiredString(root, "schema_version"))) {
                 throw invalid("unsupported_schema_version");
             }
-            MaidControlDialogueAct dialogueAct = parseEnum(
-                    MaidControlDialogueAct.class,
-                    requiredString(root, "dialogue_act"),
-                    "invalid_dialogue_act"
-            );
+            MaidControlDialogueAct dialogueAct = parseLlmDialogueAct(requiredString(root, "dialogue_act"));
             String responseText = nullableString(root, "response_text");
             if (responseText != null && exceedsCodePointLimit(responseText, MAX_RESPONSE_LENGTH)) {
                 throw invalid("response_too_long");
             }
 
-            MaidControlIntent intent = null;
-            JsonElement intentElement = root.get("intent");
-            if (intentElement != null && !intentElement.isJsonNull()) {
-                if (!intentElement.isJsonObject()) {
-                    throw invalid("intent_not_object");
-                }
-                intent = decodeIntent(intentElement.getAsJsonObject());
+            JsonElement planElement = root.get("plan");
+            if (planElement == null || !planElement.isJsonArray()) {
+                throw invalid("plan_not_array");
             }
-            return validateDialogueAct(dialogueAct, intent, responseText);
+            JsonArray planArray = planElement.getAsJsonArray();
+            if (planArray.size() > MaidControlInterpretation.MAX_PLAN_STEPS) {
+                throw invalid("plan_too_large");
+            }
+            List<MaidControlIntent> plan = new ArrayList<>(planArray.size());
+            for (JsonElement element : planArray) {
+                if (!element.isJsonObject()) {
+                    throw invalid("plan_step_not_object");
+                }
+                plan.add(decodeIntentObject(element.getAsJsonObject()));
+            }
+            return validateDialogueAct(dialogueAct, plan, responseText);
         } catch (JsonParseException | IllegalStateException exception) {
             throw invalid("invalid_json");
         }
     }
 
+    /** Encodes one typed action for bounded workflow persistence. */
+    public static String encodeIntent(MaidControlIntent intent) {
+        return encodeIntentObject(intent).toString();
+    }
+
+    /** Decodes one persisted typed action using the same whitelist as the model boundary. */
+    public static MaidControlIntent decodePersistedIntent(String rawJson) {
+        try {
+            JsonElement element = JsonParser.parseString(rawJson);
+            if (!element.isJsonObject()) {
+                throw invalid("persisted_intent_not_object");
+            }
+            return decodeIntentObject(element.getAsJsonObject());
+        } catch (JsonParseException | IllegalStateException exception) {
+            throw invalid("invalid_persisted_intent");
+        }
+    }
+
     private static MaidControlInterpretation validateDialogueAct(
             MaidControlDialogueAct dialogueAct,
-            MaidControlIntent intent,
+            List<MaidControlIntent> plan,
             String responseText
     ) {
-        if (dialogueAct == MaidControlDialogueAct.PROPOSE_INTENT) {
-            if (intent == null || responseText != null) {
-                throw invalid("invalid_proposal_payload");
-            }
-            return MaidControlInterpretation.propose(intent);
-        }
-        if (intent != null) {
-            throw invalid("unexpected_intent");
-        }
         return switch (dialogueAct) {
+            case PROPOSE_PLAN -> {
+                if (plan.isEmpty() || responseText == null || responseText.isBlank()) {
+                    throw invalid("invalid_plan_payload");
+                }
+                yield MaidControlInterpretation.plan(plan, responseText);
+            }
             case ASK_CLARIFICATION -> {
+                requireEmptyPlan(plan);
                 if (responseText == null || responseText.isBlank()) {
                     throw invalid("missing_clarification");
                 }
                 yield MaidControlInterpretation.clarify(responseText);
             }
             case SOCIAL_REPLY -> {
+                requireEmptyPlan(plan);
                 if (responseText == null || responseText.isBlank()) {
                     throw invalid("missing_social_reply");
                 }
                 yield MaidControlInterpretation.social(responseText);
             }
             case REJECT_UNSUPPORTED -> {
-                if (responseText != null) {
-                    throw invalid("unexpected_response_text");
+                requireEmptyPlan(plan);
+                if (responseText == null || responseText.isBlank()) {
+                    throw invalid("missing_rejection_reply");
                 }
-                yield MaidControlInterpretation.reject();
+                yield MaidControlInterpretation.reject(responseText);
             }
-            case PROPOSE_INTENT -> throw invalid("missing_intent");
+            case PROPOSE_INTENT -> throw invalid("offline_dialogue_act_not_allowed");
         };
     }
 
-    private static MaidControlIntent decodeIntent(JsonObject object) {
+    private static void requireEmptyPlan(List<MaidControlIntent> plan) {
+        if (!plan.isEmpty()) {
+            throw invalid("unexpected_plan");
+        }
+    }
+
+    private static MaidControlDialogueAct parseLlmDialogueAct(String value) {
+        return switch (value) {
+            case "PROPOSE_PLAN" -> MaidControlDialogueAct.PROPOSE_PLAN;
+            case "ASK_CLARIFICATION" -> MaidControlDialogueAct.ASK_CLARIFICATION;
+            case "REJECT_UNSUPPORTED" -> MaidControlDialogueAct.REJECT_UNSUPPORTED;
+            case "SOCIAL_REPLY" -> MaidControlDialogueAct.SOCIAL_REPLY;
+            default -> throw invalid("invalid_dialogue_act");
+        };
+    }
+
+    private static MaidControlIntent decodeIntentObject(JsonObject object) {
         String kind = requiredString(object, "kind");
         return switch (kind) {
             case "RUN_TASK" -> decodeRunTask(object);
@@ -128,18 +168,11 @@ public final class MaidControlJsonCodec {
                         .orElseThrow(() -> invalid("invalid_combat_policy"));
                 yield new MaidControlIntent.SetCombatPolicy(policy);
             }
-            case "RETURN_HOME" -> {
-                requireExactFields(object, Set.of("kind"));
-                yield new MaidControlIntent.ReturnHome();
-            }
+            case "RETURN_HOME" -> noFieldIntent(object, new MaidControlIntent.ReturnHome());
             case "CONFIGURE_LOCATION" -> {
                 requireExactFields(object, Set.of("kind", "location", "clear"));
                 yield new MaidControlIntent.ConfigureLocation(
-                        parseEnum(
-                                ActivityLocationType.class,
-                                requiredString(object, "location"),
-                                "invalid_location"
-                        ),
+                        parseEnum(ActivityLocationType.class, requiredString(object, "location"), "invalid_location"),
                         requiredBoolean(object, "clear")
                 );
             }
@@ -181,14 +214,61 @@ public final class MaidControlJsonCodec {
             if (!target.isEmpty() || quantity != 0 || radius != 0) {
                 throw invalid("basic_job_has_parameters");
             }
-            return JobSpecIntent.of(JobSpec.basic(type));
+            return new MaidControlIntent.RunTask(JobSpec.basic(type));
         }
         if (target.isBlank() || exceedsCodePointLimit(target, 100)
                 || quantity < 1 || quantity > 64
                 || radius < 1 || radius > 24) {
             throw invalid("job_parameter_out_of_range");
         }
-        return JobSpecIntent.of(new JobSpec(type, target, quantity, radius));
+        return new MaidControlIntent.RunTask(new JobSpec(type, target, quantity, radius));
+    }
+
+    private static JsonObject encodeIntentObject(MaidControlIntent intent) {
+        JsonObject object = new JsonObject();
+        switch (intent) {
+            case MaidControlIntent.RunTask runTask -> {
+                object.addProperty("kind", "RUN_TASK");
+                object.addProperty("job_type", runTask.job().type().name());
+                object.addProperty("target", runTask.job().target());
+                object.addProperty("quantity", runTask.job().quantity());
+                object.addProperty("radius", runTask.job().radius());
+            }
+            case MaidControlIntent.SetWorkMode setWorkMode -> {
+                object.addProperty("kind", "SET_WORK_MODE");
+                object.addProperty("mode", setWorkMode.mode().serializedName());
+            }
+            case MaidControlIntent.SetSchedule setSchedule -> {
+                object.addProperty("kind", "SET_SCHEDULE");
+                object.addProperty("schedule", setSchedule.schedule().name());
+            }
+            case MaidControlIntent.SetCombatPolicy setCombatPolicy -> {
+                object.addProperty("kind", "SET_COMBAT_POLICY");
+                object.addProperty("policy", setCombatPolicy.policy().serializedName());
+            }
+            case MaidControlIntent.ReturnHome ignored -> object.addProperty("kind", "RETURN_HOME");
+            case MaidControlIntent.ConfigureLocation configureLocation -> {
+                object.addProperty("kind", "CONFIGURE_LOCATION");
+                object.addProperty("location", configureLocation.location().name());
+                object.addProperty("clear", configureLocation.clear());
+            }
+            case MaidControlIntent.SetHomeBound setHomeBound -> {
+                object.addProperty("kind", "SET_HOME_BOUND");
+                object.addProperty("enabled", setHomeBound.enabled());
+            }
+            case MaidControlIntent.SetRadius setRadius -> {
+                object.addProperty("kind", "SET_RADIUS");
+                object.addProperty("radius", setRadius.radius());
+            }
+            case MaidControlIntent.Rename rename -> {
+                object.addProperty("kind", "RENAME");
+                object.addProperty("name", rename.name());
+            }
+            case MaidControlIntent.QueryStatus ignored -> object.addProperty("kind", "QUERY_STATUS");
+            case MaidControlIntent.QueryInventory ignored -> object.addProperty("kind", "QUERY_INVENTORY");
+            case MaidControlIntent.RetrieveInventory ignored -> object.addProperty("kind", "RETRIEVE_INVENTORY");
+        }
+        return object;
     }
 
     private static MaidControlIntent noFieldIntent(JsonObject object, MaidControlIntent intent) {
@@ -251,24 +331,11 @@ public final class MaidControlJsonCodec {
         }
     }
 
-    /**
-     * JSON Schema 的 maxLength 按 Unicode 码点计数；本地 codec 使用相同口径避免代理对造成分歧。
-     */
     private static boolean exceedsCodePointLimit(String value, int maximum) {
         return value.codePointCount(0, value.length()) > maximum;
     }
 
-    private static IllegalArgumentException invalid(String code) {
-        return new IllegalArgumentException(code);
-    }
-
-    /** Keeps task construction visually consistent with the other intent branches. */
-    private static final class JobSpecIntent {
-        private JobSpecIntent() {
-        }
-
-        private static MaidControlIntent of(JobSpec job) {
-            return new MaidControlIntent.RunTask(job);
-        }
+    private static IllegalArgumentException invalid(String reason) {
+        return new IllegalArgumentException("Invalid maid control JSON: " + reason);
     }
 }

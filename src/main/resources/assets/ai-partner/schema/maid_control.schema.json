@@ -1,64 +1,67 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ozozorz/ai-partner/schema/maid_control.schema.json",
-  "title": "AI Partner maid control protocol",
+  "title": "AI Partner dialogue and bounded workflow protocol",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "dialogue_act", "intent", "response_text"],
+  "required": ["schema_version", "dialogue_act", "plan", "response_text"],
   "properties": {
-    "schema_version": {"const": "2.0"},
+    "schema_version": {"const": "3.0"},
     "dialogue_act": {
-      "enum": ["PROPOSE_INTENT", "ASK_CLARIFICATION", "REJECT_UNSUPPORTED", "SOCIAL_REPLY"]
+      "enum": ["PROPOSE_PLAN", "ASK_CLARIFICATION", "REJECT_UNSUPPORTED", "SOCIAL_REPLY"]
     },
-    "intent": {
-      "oneOf": [
-        {"type": "null"},
-        {"$ref": "#/$defs/runTask"},
-        {"$ref": "#/$defs/setWorkMode"},
-        {"$ref": "#/$defs/setSchedule"},
-        {"$ref": "#/$defs/setCombatPolicy"},
-        {"$ref": "#/$defs/returnHome"},
-        {"$ref": "#/$defs/configureLocation"},
-        {"$ref": "#/$defs/setHomeBound"},
-        {"$ref": "#/$defs/setRadius"},
-        {"$ref": "#/$defs/rename"},
-        {"$ref": "#/$defs/queryStatus"},
-        {"$ref": "#/$defs/queryInventory"},
-        {"$ref": "#/$defs/retrieveInventory"}
-      ]
+    "plan": {
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/runTask"},
+          {"$ref": "#/$defs/setWorkMode"},
+          {"$ref": "#/$defs/setSchedule"},
+          {"$ref": "#/$defs/setCombatPolicy"},
+          {"$ref": "#/$defs/returnHome"},
+          {"$ref": "#/$defs/configureLocation"},
+          {"$ref": "#/$defs/setHomeBound"},
+          {"$ref": "#/$defs/setRadius"},
+          {"$ref": "#/$defs/rename"},
+          {"$ref": "#/$defs/queryStatus"},
+          {"$ref": "#/$defs/queryInventory"},
+          {"$ref": "#/$defs/retrieveInventory"}
+        ]
+      }
     },
     "response_text": {"type": ["string", "null"], "maxLength": 240}
   },
   "allOf": [
     {
-      "if": {"properties": {"dialogue_act": {"const": "PROPOSE_INTENT"}}},
+      "if": {"properties": {"dialogue_act": {"const": "PROPOSE_PLAN"}}},
       "then": {
         "properties": {
-          "intent": {"not": {"type": "null"}},
-          "response_text": {"type": "null"}
-        }
-      }
-    },
-    {
-      "if": {"properties": {"dialogue_act": {"enum": ["ASK_CLARIFICATION", "SOCIAL_REPLY"]}}},
-      "then": {
-        "properties": {
-          "intent": {"type": "null"},
+          "plan": {"minItems": 1},
           "response_text": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 240,
             "pattern": "[^\\u0009-\\u000D\\u001C-\\u0020\\u1680\\u2000-\\u2006\\u2008-\\u200A\\u2028-\\u2029\\u205F\\u3000]"
           }
         }
       }
     },
     {
-      "if": {"properties": {"dialogue_act": {"const": "REJECT_UNSUPPORTED"}}},
+      "if": {
+        "properties": {
+          "dialogue_act": {
+            "enum": ["ASK_CLARIFICATION", "REJECT_UNSUPPORTED", "SOCIAL_REPLY"]
+          }
+        }
+      },
       "then": {
         "properties": {
-          "intent": {"type": "null"},
-          "response_text": {"type": "null"}
+          "plan": {"maxItems": 0},
+          "response_text": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "[^\\u0009-\\u000D\\u001C-\\u0020\\u1680\\u2000-\\u2006\\u2008-\\u200A\\u2028-\\u2029\\u205F\\u3000]"
+          }
         }
       }
     }
@@ -80,9 +83,7 @@
       "allOf": [
         {
           "if": {
-            "properties": {
-              "job_type": {"enum": ["FOLLOW", "STAY", "CANCEL"]}
-            },
+            "properties": {"job_type": {"enum": ["FOLLOW", "STAY", "CANCEL"]}},
             "required": ["job_type"]
           },
           "then": {
@@ -179,12 +180,8 @@
           "minLength": 1,
           "maxLength": 32,
           "allOf": [
-            {
-              "pattern": "[^\\u0009-\\u000D\\u001C-\\u0020\\u1680\\u2000-\\u2006\\u2008-\\u200A\\u2028-\\u2029\\u205F\\u3000]"
-            },
-            {
-              "not": {"pattern": "[\\u0000-\\u001F\\u007F-\\u009F]"}
-            }
+            {"pattern": "[^\\u0009-\\u000D\\u001C-\\u0020\\u1680\\u2000-\\u2006\\u2008-\\u200A\\u2028-\\u2029\\u205F\\u3000]"},
+            {"not": {"pattern": "[\\u0000-\\u001F\\u007F-\\u009F]"}}
           ]
         }
       }

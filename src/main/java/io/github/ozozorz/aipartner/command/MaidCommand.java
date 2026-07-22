@@ -9,15 +9,15 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.github.ozozorz.aipartner.AiPartnerMod;
 import io.github.ozozorz.aipartner.conversation.MaidConversationService;
-import io.github.ozozorz.aipartner.contract.ContractDecision;
 import io.github.ozozorz.aipartner.contract.JobSpec;
 import io.github.ozozorz.aipartner.combat.CombatPolicy;
-import io.github.ozozorz.aipartner.core.order.MaidOrderService;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
-import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
 import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
 import io.github.ozozorz.aipartner.control.MaidDriveMode;
 import io.github.ozozorz.aipartner.control.MaidDriverSettings;
+import io.github.ozozorz.aipartner.control.MaidControlDecision;
+import io.github.ozozorz.aipartner.control.MaidControlIntent;
+import io.github.ozozorz.aipartner.control.MaidControlService;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.evaluation.OfflineEvaluationService;
 import io.github.ozozorz.aipartner.evaluation.OfflineLlmEvaluationService;
@@ -466,9 +466,7 @@ public final class MaidCommand {
         if (partner == null) {
             return 0;
         }
-        partner.requestReturnHome(player);
-        context.getSource().sendSuccess(() -> Component.translatable("message.ai-partner.returning_home"), false);
-        return 1;
+        return executeControl(context, partner, player, new MaidControlIntent.ReturnHome(), "home");
     }
 
     private static int renameMaid(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -478,14 +476,7 @@ public final class MaidCommand {
             return 0;
         }
         String name = StringArgumentType.getString(context, "name").strip();
-        if (name.isEmpty() || name.length() > 32 || name.chars().anyMatch(Character::isISOControl)) {
-            context.getSource().sendFailure(Component.translatable("message.ai-partner.invalid_name"));
-            return 0;
-        }
-        partner.setCustomName(Component.literal(name));
-        partner.setCustomNameVisible(true);
-        context.getSource().sendSuccess(() -> Component.translatable("message.ai-partner.renamed", name), false);
-        return 1;
+        return executeControl(context, partner, player, new MaidControlIntent.Rename(name), "name " + name);
     }
 
     private static int setSchedule(
@@ -497,12 +488,13 @@ public final class MaidCommand {
         if (partner == null) {
             return 0;
         }
-        partner.setScheduleType(scheduleType);
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "message.ai-partner.schedule_set",
-                scheduleType.name()
-        ), false);
-        return 1;
+        return executeControl(
+                context,
+                partner,
+                player,
+                new MaidControlIntent.SetSchedule(scheduleType),
+                "schedule " + scheduleType.name()
+        );
     }
 
     private static int configureLocation(
@@ -515,16 +507,13 @@ public final class MaidCommand {
         if (partner == null) {
             return 0;
         }
-        if (set) {
-            partner.setActivityLocation(type);
-        } else {
-            partner.clearActivityLocation(type);
-        }
-        context.getSource().sendSuccess(() -> Component.translatable(
-                set ? "message.ai-partner.location_set" : "message.ai-partner.location_cleared",
-                type.name()
-        ), false);
-        return 1;
+        return executeControl(
+                context,
+                partner,
+                player,
+                new MaidControlIntent.ConfigureLocation(type, !set),
+                "location " + (set ? "set " : "clear ") + type.name()
+        );
     }
 
     private static int setHomeBound(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -534,12 +523,13 @@ public final class MaidCommand {
             return 0;
         }
         boolean enabled = BoolArgumentType.getBool(context, "enabled");
-        partner.setHomeBound(enabled);
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "message.ai-partner.home_bound_set",
-                enabled
-        ), false);
-        return 1;
+        return executeControl(
+                context,
+                partner,
+                player,
+                new MaidControlIntent.SetHomeBound(enabled),
+                "home-bound " + enabled
+        );
     }
 
     private static int setActivityRadius(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -549,12 +539,13 @@ public final class MaidCommand {
             return 0;
         }
         int radius = IntegerArgumentType.getInteger(context, "radius");
-        partner.setActivityRadius(radius);
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "message.ai-partner.radius_set",
-                radius
-        ), false);
-        return 1;
+        return executeControl(
+                context,
+                partner,
+                player,
+                new MaidControlIntent.SetRadius(radius),
+                "radius " + radius
+        );
     }
 
     private static int showWorkMode(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -583,12 +574,13 @@ public final class MaidCommand {
             context.getSource().sendFailure(Component.translatable("message.ai-partner.invalid_work_mode", requested));
             return 0;
         }
-        partner.setWorkMode(mode);
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "message.ai-partner.work_mode_set",
-                mode.serializedName()
-        ), false);
-        return 1;
+        return executeControl(
+                context,
+                partner,
+                player,
+                new MaidControlIntent.SetWorkMode(mode),
+                "work " + mode.serializedName()
+        );
     }
 
     private static int showCombatPolicy(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -619,12 +611,13 @@ public final class MaidCommand {
             ));
             return 0;
         }
-        partner.setCombatPolicy(policy);
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "message.ai-partner.combat_policy_set",
-                policy.serializedName()
-        ), false);
-        return 1;
+        return executeControl(
+                context,
+                partner,
+                player,
+                new MaidControlIntent.SetCombatPolicy(policy),
+                "combat " + policy.serializedName()
+        );
     }
 
     private static AiPartnerEntity requirePartner(
@@ -640,65 +633,35 @@ public final class MaidCommand {
 
     private static int status(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         ServerPlayer player = context.getSource().getPlayerOrException();
-        AiPartnerEntity partner = PartnerService.findOwnedPartner(player).orElse(null);
+        AiPartnerEntity partner = requirePartner(context, player);
         if (partner == null) {
-            context.getSource().sendFailure(Component.translatable("message.ai-partner.not_found"));
             return 0;
         }
-        String contractStatus = partner.getCurrentContract()
-                .map(contract -> contract.status().name())
-                .orElse("NONE");
-        String jobType = partner.getCurrentContract()
-                .map(contract -> contract.job().type().name())
-                .orElse("NONE");
-        context.getSource().sendSuccess(
-                () -> Component.translatable(
-                        "message.ai-partner.status",
-                        partner.getMode().name(),
-                        jobType,
-                        contractStatus,
-                        partner.getWorkMode().serializedName(),
-                        partner.getCombatPolicy().serializedName(),
-                        partner.getGrowthLevel(),
-                        partner.getGrowthExperience(),
-                        partner.getAffection()
-                ),
-                false
-        );
-        return 1;
+        return executeControl(context, partner, player, new MaidControlIntent.QueryStatus(), "status");
     }
 
     private static int inventory(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         ServerPlayer player = context.getSource().getPlayerOrException();
-        AiPartnerEntity partner = PartnerService.findOwnedPartner(player).orElse(null);
+        AiPartnerEntity partner = requirePartner(context, player);
         if (partner == null) {
-            context.getSource().sendFailure(Component.translatable("message.ai-partner.not_found"));
             return 0;
         }
-        context.getSource().sendSuccess(
-                () -> Component.translatable("message.ai-partner.inventory", partner.inventorySummary()),
-                false
-        );
-        return 1;
+        return executeControl(context, partner, player, new MaidControlIntent.QueryInventory(), "inventory");
     }
 
     private static int retrieveInventory(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         ServerPlayer player = context.getSource().getPlayerOrException();
-        AiPartnerEntity partner = PartnerService.findOwnedPartner(player).orElse(null);
+        AiPartnerEntity partner = requirePartner(context, player);
         if (partner == null) {
-            context.getSource().sendFailure(Component.translatable("message.ai-partner.not_found"));
             return 0;
         }
-        int returned = partner.returnInventoryTo(player);
-        if (returned < 0) {
-            context.getSource().sendFailure(Component.translatable("message.ai-partner.inventory_busy"));
-            return 0;
-        }
-        context.getSource().sendSuccess(
-                () -> Component.translatable("message.ai-partner.inventory_returned", returned),
-                false
+        return executeControl(
+                context,
+                partner,
+                player,
+                new MaidControlIntent.RetrieveInventory(),
+                "retrieve"
         );
-        return 1;
     }
 
     private static int listExperimentScenarios(CommandContext<CommandSourceStack> context) {
@@ -1115,33 +1078,36 @@ public final class MaidCommand {
             return 0;
         }
 
-        ContractDecision decision = MaidOrderService.submit(
+        return executeControl(
+                context,
                 partner,
                 player,
-                candidate,
-                rawInstruction,
-                TaskExecutionPolicy.DEFAULT
+                new MaidControlIntent.RunTask(candidate),
+                rawInstruction
         );
-        if (!decision.accepted()) {
-            context.getSource().sendFailure(Component.translatable(decision.messageKey()));
-            return 0;
-        }
-
-        String responseKey = responseKey(candidate, decision);
-        context.getSource().sendSuccess(() -> Component.translatable(responseKey), false);
-        return 1;
     }
 
-    private static String responseKey(JobSpec candidate, ContractDecision decision) {
-        return switch (candidate.type()) {
-            case FOLLOW -> "message.ai-partner.following";
-            case STAY -> "message.ai-partner.staying";
-            case CANCEL -> "message.ai-partner.cancelled";
-            case COLLECT_BLOCK -> "message.ai-partner.collecting";
-            case DEPOSIT_ITEM -> "message.ai-partner.depositing";
-            case COLLECT_AND_DEPOSIT -> "message.ai-partner.collecting_and_depositing";
-            case TRANSFER_ITEM -> "message.ai-partner.transferring";
-        };
+    /** Sends every command capability through the same semantic action entry as UI and LLM plans. */
+    private static int executeControl(
+            CommandContext<CommandSourceStack> context,
+            AiPartnerEntity partner,
+            ServerPlayer player,
+            MaidControlIntent intent,
+            String rawInstruction
+    ) {
+        MaidControlDecision decision = MaidControlService.apply(
+                partner,
+                player,
+                intent,
+                rawInstruction,
+                "DIRECT_COMMAND"
+        );
+        if (!decision.accepted()) {
+            context.getSource().sendFailure(decision.message());
+            return 0;
+        }
+        context.getSource().sendSuccess(decision::message, false);
+        return 1;
     }
 
     private static void cancelPendingRequest(UUID playerId) {

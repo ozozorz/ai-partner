@@ -1,11 +1,11 @@
 package io.github.ozozorz.aipartner.inventory;
 
-import io.github.ozozorz.aipartner.contract.ContractDecision;
 import io.github.ozozorz.aipartner.contract.ContractStatus;
-import io.github.ozozorz.aipartner.contract.JobSpec;
 import io.github.ozozorz.aipartner.combat.CombatPolicy;
-import io.github.ozozorz.aipartner.core.order.MaidOrderService;
-import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
+import io.github.ozozorz.aipartner.control.MaidActionRegistry;
+import io.github.ozozorz.aipartner.control.MaidActionRequest;
+import io.github.ozozorz.aipartner.control.MaidControlDecision;
+import io.github.ozozorz.aipartner.control.MaidControlIntent;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.entity.PartnerMenuAction;
 import io.github.ozozorz.aipartner.entity.PartnerMode;
@@ -261,14 +261,11 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
 
         Optional<MaidWorkMode> selectedWork = MaidWorkMode.fromMenuButtonId(buttonId);
         if (selectedWork.isPresent()) {
-            partner.setWorkMode(selectedWork.get());
-            serverPlayer.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
-                    "message.ai-partner.work_mode_set",
-                    net.minecraft.network.chat.Component.translatable(
-                            "work_mode.ai-partner." + selectedWork.get().serializedName()
-                    )
-            ));
-            return true;
+            return executeMenuIntent(
+                    serverPlayer,
+                    new MaidControlIntent.SetWorkMode(selectedWork.get()),
+                    "ui_button:work_mode:" + selectedWork.get().serializedName()
+            );
         }
 
         Optional<PartnerMenuAction> action = PartnerMenuAction.fromButtonId(buttonId);
@@ -276,60 +273,53 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
             return false;
         }
 
-        if (!action.get().isContractAction()) {
-            boolean handled = handleLifeAction(action.get(), serverPlayer);
-            if (handled) {
-                serverPlayer.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
-                        action.get().responseKey()
-                ));
-            }
-            return handled;
-        }
-
-        JobSpec candidate = JobSpec.basic(java.util.Objects.requireNonNull(action.get().jobType()));
-        String rawInstruction = "ui_button:" + action.get().name().toLowerCase();
-        ContractDecision decision = MaidOrderService.submit(
-                partner,
+        MaidControlIntent intent = menuIntent(action.get());
+        return executeMenuIntent(
                 serverPlayer,
-                candidate,
-                rawInstruction,
-                TaskExecutionPolicy.standard("DIRECT_UI")
+                intent,
+                "ui_button:" + action.get().name().toLowerCase(java.util.Locale.ROOT)
         );
-        if (!decision.accepted()) {
-            serverPlayer.sendSystemMessage(net.minecraft.network.chat.Component.translatable(decision.messageKey()));
-            return false;
-        }
-
-        serverPlayer.sendSystemMessage(net.minecraft.network.chat.Component.translatable(action.get().responseKey()));
-        return true;
     }
 
     /**
      * 执行不经过有限任务 DSL 的生活与日程按钮。
      */
-    private boolean handleLifeAction(PartnerMenuAction action, ServerPlayer player) {
-        switch (action) {
-            case RETURN_HOME -> partner.requestReturnHome(player);
-            case CYCLE_SCHEDULE -> partner.setScheduleType(partner.getScheduleType().next());
-            case TOGGLE_HOME_BOUND -> partner.setHomeBound(!partner.isHomeBound());
-            case SET_WORK_LOCATION -> partner.setActivityLocation(ActivityLocationType.WORK);
-            case CLEAR_WORK_LOCATION -> partner.clearActivityLocation(ActivityLocationType.WORK);
-            case SET_LEISURE_LOCATION -> partner.setActivityLocation(ActivityLocationType.LEISURE);
-            case CLEAR_LEISURE_LOCATION -> partner.clearActivityLocation(ActivityLocationType.LEISURE);
-            case SET_SLEEP_LOCATION -> partner.setActivityLocation(ActivityLocationType.SLEEP);
-            case CLEAR_SLEEP_LOCATION -> partner.clearActivityLocation(ActivityLocationType.SLEEP);
-            case DECREASE_RADIUS -> partner.setActivityRadius(Math.max(1, partner.getActivityRadius() - 1));
-            case INCREASE_RADIUS -> partner.setActivityRadius(Math.min(
+    private MaidControlIntent menuIntent(PartnerMenuAction action) {
+        return switch (action) {
+            case FOLLOW, STAY, CANCEL -> new MaidControlIntent.RunTask(
+                    io.github.ozozorz.aipartner.contract.JobSpec.basic(
+                            java.util.Objects.requireNonNull(action.jobType())
+                    )
+            );
+            case RETURN_HOME -> new MaidControlIntent.ReturnHome();
+            case CYCLE_SCHEDULE -> new MaidControlIntent.SetSchedule(partner.getScheduleType().next());
+            case TOGGLE_HOME_BOUND -> new MaidControlIntent.SetHomeBound(!partner.isHomeBound());
+            case SET_WORK_LOCATION -> new MaidControlIntent.ConfigureLocation(ActivityLocationType.WORK, false);
+            case CLEAR_WORK_LOCATION -> new MaidControlIntent.ConfigureLocation(ActivityLocationType.WORK, true);
+            case SET_LEISURE_LOCATION -> new MaidControlIntent.ConfigureLocation(ActivityLocationType.LEISURE, false);
+            case CLEAR_LEISURE_LOCATION -> new MaidControlIntent.ConfigureLocation(ActivityLocationType.LEISURE, true);
+            case SET_SLEEP_LOCATION -> new MaidControlIntent.ConfigureLocation(ActivityLocationType.SLEEP, false);
+            case CLEAR_SLEEP_LOCATION -> new MaidControlIntent.ConfigureLocation(ActivityLocationType.SLEEP, true);
+            case DECREASE_RADIUS -> new MaidControlIntent.SetRadius(Math.max(1, partner.getActivityRadius() - 1));
+            case INCREASE_RADIUS -> new MaidControlIntent.SetRadius(Math.min(
                     MaidGameplayConfig.get().maximumActivityRadius(),
                     partner.getActivityRadius() + 1
             ));
-            case CYCLE_WORK_MODE -> partner.cycleWorkMode();
-            case CYCLE_COMBAT_POLICY -> partner.cycleCombatPolicy();
-            case FOLLOW, STAY, CANCEL -> {
-                return false;
-            }
-        }
-        return true;
+            case CYCLE_WORK_MODE -> new MaidControlIntent.SetWorkMode(partner.getWorkMode().next());
+            case CYCLE_COMBAT_POLICY -> new MaidControlIntent.SetCombatPolicy(partner.getCombatPolicy().next());
+        };
+    }
+
+    /** Dispatches one resolved UI action through the canonical semantic-action registry. */
+    private boolean executeMenuIntent(ServerPlayer player, MaidControlIntent intent, String rawInstruction) {
+        MaidControlDecision decision = MaidActionRegistry.execute(
+                partner,
+                player,
+                intent,
+                MaidActionRequest.direct(rawInstruction, "DIRECT_UI")
+        );
+        player.sendSystemMessage(decision.message());
+        return decision.accepted();
     }
 
     @Override

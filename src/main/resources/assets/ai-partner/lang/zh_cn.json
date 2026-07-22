@@ -225,5 +225,9 @@
   "gui.ai-partner.dialogue.readiness.llm_disabled": "config/ai-partner.json 中已禁用 LLM。",
   "gui.ai-partner.dialogue.readiness.model_not_configured": "尚未配置 LLM 模型。",
   "gui.ai-partner.dialogue.readiness.invalid_api_key_env": "API Key 环境变量名不合法。",
-  "gui.ai-partner.dialogue.readiness.missing_api_key_env": "所选 API Key 环境变量尚未设置。"
+  "gui.ai-partner.dialogue.readiness.missing_api_key_env": "所选 API Key 环境变量尚未设置。",
+  "message.ai-partner.workflow_completed": "有界工作流已根据服务器真实结果完成。",
+  "message.ai-partner.workflow_failed": "有界工作流执行失败，服务器结果：%s。",
+  "message.ai-partner.workflow_completed_dialogue": "[已验证完成] %s",
+  "message.ai-partner.workflow_failed_dialogue": "[已验证失败：%1$s] %2$s"
 }

@@ -9,15 +9,19 @@ import io.github.ozozorz.aipartner.core.behavior.ManualDirective;
 import io.github.ozozorz.aipartner.core.event.ContractLifecycleEvent;
 import io.github.ozozorz.aipartner.core.event.MaidDomainEvents;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
+import io.github.ozozorz.aipartner.job.AllowedTargets;
 import io.github.ozozorz.aipartner.job.JobType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import org.jspecify.annotations.Nullable;
@@ -28,8 +32,8 @@ import org.slf4j.LoggerFactory;
  * 服务端唯一活动契约的运行时，统一处理指令、任务、暂停、恢复、终态和持久化。
  */
 public final class MaidTaskRuntime {
-    public static final int CURRENT_DATA_VERSION = 6;
-    private static final int CONTRACT_PREDICATE_FORMAT_VERSION = 1;
+    public static final int CURRENT_DATA_VERSION = 7;
+    private static final int CONTRACT_PREDICATE_FORMAT_VERSION = 2;
     private static final Logger LOGGER = LoggerFactory.getLogger(MaidTaskRuntime.class);
 
     private final AiPartnerEntity partner;
@@ -94,7 +98,9 @@ public final class MaidTaskRuntime {
             }
         }
         publish("contract_running", actor, rawInstruction);
-        partner.showSpeechBubble(feedbackFor(contract.job().type()));
+        if (!isConversationalWorkflow()) {
+            partner.showSpeechBubble(feedbackFor(contract.job().type()));
+        }
     }
 
     private void executeCancelContract(
@@ -114,7 +120,9 @@ public final class MaidTaskRuntime {
         publish("contract_running", actor, rawInstruction);
         cancelContract.markCompleted();
         publish("contract_completed", actor, rawInstruction);
-        partner.showSpeechBubble(feedbackFor(JobType.CANCEL));
+        if (!isConversationalWorkflow()) {
+            partner.showSpeechBubble(feedbackFor(JobType.CANCEL));
+        }
     }
 
     private void activateDirective(ManualDirective directive) {
@@ -158,6 +166,11 @@ public final class MaidTaskRuntime {
      */
     public void tick() {
         if (partner.level().isClientSide()) {
+            return;
+        }
+        FailureCode invariantViolation = runtimeInvariantViolation();
+        if (invariantViolation != FailureCode.NONE) {
+            fail(invariantViolation);
             return;
         }
         if (behaviorController.isInventoryMenuOpen() || behaviorController.isTemporarilyInterrupted()) {
@@ -214,8 +227,10 @@ public final class MaidTaskRuntime {
         behaviorController.clearActivity();
         partner.getNavigation().stop();
         publish("contract_failed", null, "runtime_monitor");
-        notifyOwner(Component.translatable("message.ai-partner.failed", failureCode.name()));
-        partner.showSpeechBubble(Component.translatable("bubble.ai-partner.task_failed"));
+        if (!isConversationalWorkflow()) {
+            notifyOwner(Component.translatable("message.ai-partner.failed", failureCode.name()));
+            partner.showSpeechBubble(Component.translatable("bubble.ai-partner.task_failed"));
+        }
     }
 
     /**
@@ -225,19 +240,25 @@ public final class MaidTaskRuntime {
         if (currentContract == null || currentContract.status() != ContractStatus.RUNNING) {
             return;
         }
+        if (!goalPredicatesSatisfied()) {
+            fail(FailureCode.CONTRACT_VIOLATION);
+            return;
+        }
         TaskContract completedContract = currentContract;
         completedContract.markCompleted();
         stopActiveTask();
         behaviorController.clearActivity();
         partner.getNavigation().stop();
         publish("contract_completed", null, "goal_predicate_satisfied");
-        notifyOwner(Component.translatable(
-                "message.ai-partner.completed",
-                completedContract.job().type().name(),
-                completedContract.job().quantity(),
-                completedContract.job().target()
-        ));
-        partner.showSpeechBubble(Component.translatable("bubble.ai-partner.task_completed"));
+        if (!isConversationalWorkflow()) {
+            notifyOwner(Component.translatable(
+                    "message.ai-partner.completed",
+                    completedContract.job().type().name(),
+                    completedContract.job().quantity(),
+                    completedContract.job().target()
+            ));
+            partner.showSpeechBubble(Component.translatable("bubble.ai-partner.task_completed"));
+        }
     }
 
     /**
@@ -469,6 +490,12 @@ public final class MaidTaskRuntime {
         output.putInt("ContractMaxLlmReplans", contract.failurePolicy().maxLlmReplans());
         output.putInt("ContractTimeoutSeconds", contract.failurePolicy().timeoutSeconds());
         output.putInt("ContractPredicateFormatVersion", CONTRACT_PREDICATE_FORMAT_VERSION);
+        output.putInt("ContractExecutionAnchorBound", contract.executionAnchor().bound() ? 1 : 0);
+        if (contract.executionAnchor().bound()) {
+            output.putString("ContractOwnerId", contract.executionAnchor().ownerId().toString());
+            output.putString("ContractOriginDimension", contract.executionAnchor().dimensionId());
+            output.putLong("ContractOriginPosition", contract.executionAnchor().originPosition());
+        }
         writePredicateList(output, "ContractPrecondition", contract.preconditions());
         writePredicateList(output, "ContractGoalPredicate", contract.goalPredicates());
         writePredicateList(output, "ContractInvariant", contract.invariants());
@@ -499,19 +526,43 @@ public final class MaidTaskRuntime {
                     policy
             );
         }
-        if (predicateFormat != CONTRACT_PREDICATE_FORMAT_VERSION) {
+        if (predicateFormat != 1 && predicateFormat != CONTRACT_PREDICATE_FORMAT_VERSION) {
             throw new IllegalArgumentException("Unsupported contract predicate format " + predicateFormat);
         }
+        List<String> preconditions = readPredicateList(input, "ContractPrecondition");
+        List<String> goals = readPredicateList(input, "ContractGoalPredicate");
+        List<String> invariants = readPredicateList(input, "ContractInvariant");
+        if (predicateFormat == 1) {
+            return TaskContract.restored(
+                    UUID.fromString(savedContractId),
+                    job,
+                    preconditions,
+                    goals,
+                    invariants,
+                    input.getLongOr("ContractAcceptedAt", System.currentTimeMillis()),
+                    ContractStatus.valueOf(input.getStringOr("ContractStatus", ContractStatus.FAILED.name())),
+                    FailureCode.valueOf(input.getStringOr("ContractFailureCode", FailureCode.INTERNAL_ERROR.name())),
+                    policy
+            );
+        }
+        TaskContract.ExecutionAnchor anchor = input.getIntOr("ContractExecutionAnchorBound", 0) == 0
+                ? TaskContract.ExecutionAnchor.unbound()
+                : TaskContract.ExecutionAnchor.bound(
+                        UUID.fromString(input.getStringOr("ContractOwnerId", "")),
+                        input.getStringOr("ContractOriginDimension", ""),
+                        input.getLongOr("ContractOriginPosition", 0L)
+                );
         return TaskContract.restored(
                 UUID.fromString(savedContractId),
                 job,
-                readPredicateList(input, "ContractPrecondition"),
-                readPredicateList(input, "ContractGoalPredicate"),
-                readPredicateList(input, "ContractInvariant"),
+                preconditions,
+                goals,
+                invariants,
                 input.getLongOr("ContractAcceptedAt", System.currentTimeMillis()),
                 ContractStatus.valueOf(input.getStringOr("ContractStatus", ContractStatus.FAILED.name())),
                 FailureCode.valueOf(input.getStringOr("ContractFailureCode", FailureCode.INTERNAL_ERROR.name())),
-                policy
+                policy,
+                anchor
         );
     }
 
@@ -564,6 +615,85 @@ public final class MaidTaskRuntime {
                 && currentContract.status() == ContractStatus.RUNNING;
     }
 
+    /** Evaluates persisted owner, dimension, origin, and world-safety invariants every server tick. */
+    private FailureCode runtimeInvariantViolation() {
+        if (currentContract == null || currentContract.status() != ContractStatus.RUNNING) {
+            return FailureCode.NONE;
+        }
+        if (!partner.isAlive()) {
+            return FailureCode.PARTNER_DIED;
+        }
+        TaskContract.ExecutionAnchor anchor = currentContract.executionAnchor();
+        if (anchor.bound()) {
+            if (!(partner.getOwner() instanceof ServerPlayer owner)) {
+                return FailureCode.OWNER_OFFLINE;
+            }
+            if (!anchor.ownerId().equals(owner.getUUID())) {
+                return FailureCode.PERMISSION_DENIED;
+            }
+            if (!anchor.dimensionId().equals(partner.level().dimension().identifier().toString())
+                    || partner.level() != owner.level()) {
+                return FailureCode.DIFFERENT_DIMENSION;
+            }
+            if (currentContract.job().radius() > 0
+                    && horizontalDistanceSquared(
+                    partner.blockPosition(),
+                    BlockPos.of(anchor.originPosition())
+            ) > square(currentContract.job().radius())) {
+                return FailureCode.CONTRACT_VIOLATION;
+            }
+        }
+        JobType type = currentContract.job().type();
+        if ((type == JobType.COLLECT_BLOCK || type == JobType.COLLECT_AND_DEPOSIT)
+                && (!(partner.level() instanceof ServerLevel level)
+                || !level.getGameRules().get(GameRules.MOB_GRIEFING))) {
+            return FailureCode.PERMISSION_DENIED;
+        }
+        if ((type == JobType.COLLECT_BLOCK || type == JobType.COLLECT_AND_DEPOSIT)
+                && !partner.hasAxe()) {
+            return FailureCode.MISSING_TOOL;
+        }
+        return FailureCode.NONE;
+    }
+
+    /** Independently certifies task-specific goal evidence before changing a contract to COMPLETED. */
+    private boolean goalPredicatesSatisfied() {
+        if (currentContract == null) {
+            return false;
+        }
+        JobType type = currentContract.job().type();
+        if (type == JobType.CANCEL) {
+            return true;
+        }
+        if (activeTask == null) {
+            return type == JobType.FOLLOW || type == JobType.STAY;
+        }
+        MaidTaskSnapshot snapshot = activeTask.snapshot();
+        return switch (type) {
+            case COLLECT_BLOCK -> AllowedTargets.resolveCollectibleBlock(currentContract.job().target())
+                    .flatMap(AllowedTargets::asCollectibleItem)
+                    .map(item -> partner.countItem(item)
+                            - snapshot.integer("initialTargetCount", 0) >= currentContract.job().quantity())
+                    .orElse(false);
+            case DEPOSIT_ITEM, TRANSFER_ITEM ->
+                    snapshot.integer("movedCount", 0) >= currentContract.job().quantity();
+            case COLLECT_AND_DEPOSIT ->
+                    snapshot.integer("collectedCount", 0) >= currentContract.job().quantity()
+                            && snapshot.integer("depositMovedCount", 0) >= currentContract.job().quantity();
+            case FOLLOW, STAY, CANCEL -> true;
+        };
+    }
+
+    private static double horizontalDistanceSquared(BlockPos first, BlockPos second) {
+        double x = first.getX() - second.getX();
+        double z = first.getZ() - second.getZ();
+        return x * x + z * z;
+    }
+
+    private static double square(double value) {
+        return value * value;
+    }
+
     private MaidTaskContext requireActiveContext() {
         if (activeContext == null) {
             throw new IllegalStateException("Task runtime has no active context");
@@ -602,6 +732,11 @@ public final class MaidTaskRuntime {
         if (partner.getOwner() instanceof ServerPlayer serverPlayer) {
             serverPlayer.sendSystemMessage(message);
         }
+    }
+
+    private boolean isConversationalWorkflow() {
+        return executionPolicy.sourceId().startsWith("LLM")
+                && executionPolicy.sourceId().contains("WORKFLOW");
     }
 
     private static Component feedbackFor(JobType jobType) {

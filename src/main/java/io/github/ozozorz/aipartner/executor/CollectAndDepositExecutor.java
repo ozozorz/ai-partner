@@ -20,6 +20,7 @@ public final class CollectAndDepositExecutor {
     private @Nullable TaskContract contract;
     private @Nullable TaskExecutionListener resultListener;
     private final GameTimeDeadline timeout = new GameTimeDeadline();
+    private int collectedCount;
 
     public CollectAndDepositExecutor(
             AiPartnerEntity partner,
@@ -53,6 +54,7 @@ public final class CollectAndDepositExecutor {
             TaskContract taskContract,
             Phase savedPhase,
             int savedCollectInitialTargetCount,
+            int savedCollectedCount,
             int savedDepositMovedCount,
             long savedRemainingTimeoutTicks,
             TaskExecutionListener listener
@@ -60,6 +62,7 @@ public final class CollectAndDepositExecutor {
         stop();
         contract = taskContract;
         resultListener = Objects.requireNonNull(listener, "listener");
+        collectedCount = Math.max(0, savedCollectedCount);
         timeout.restore(
                 partner.level().getGameTime(),
                 taskContract.failurePolicy().timeoutSeconds() * 20L,
@@ -121,6 +124,7 @@ public final class CollectAndDepositExecutor {
         phase = Phase.IDLE;
         contract = null;
         resultListener = null;
+        collectedCount = 0;
         timeout.clear();
     }
 
@@ -140,6 +144,11 @@ public final class CollectAndDepositExecutor {
         return depositExecutor.movedCount();
     }
 
+    /** Returns the certified collection delta captured before the deposit phase starts. */
+    public int collectedCount() {
+        return collectedCount;
+    }
+
     /** 返回父契约可持久化的剩余总超时 tick。 */
     public long remainingTimeoutTicks() {
         return timeout.remainingTicks(partner.level().getGameTime());
@@ -153,6 +162,7 @@ public final class CollectAndDepositExecutor {
     }
 
     private void completeCollectPhase() {
+        collectedCount = Math.max(collectedCount, collectExecutor.collectedCount());
         collectExecutor.stop();
         transitionTo(Phase.DEPOSITING);
         depositExecutor.start(requireContract(), depositListener);

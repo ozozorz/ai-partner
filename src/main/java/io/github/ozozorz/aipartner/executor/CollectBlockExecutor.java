@@ -84,7 +84,9 @@ public final class CollectBlockExecutor {
             listener.onFailed(FailureCode.INTERNAL_ERROR);
             return;
         }
-        this.origin = partner.blockPosition().immutable();
+        this.origin = taskContract.executionAnchor().bound()
+                ? BlockPos.of(taskContract.executionAnchor().originPosition())
+                : partner.blockPosition().immutable();
         this.initialTargetCount = initialCountOverride == null
                 ? partner.countItem(targetItem)
                 : initialCountOverride;
@@ -183,6 +185,11 @@ public final class CollectBlockExecutor {
 
     public int initialTargetCount() {
         return initialTargetCount;
+    }
+
+    /** Returns the observed target-item delta used as composite-phase contract evidence. */
+    public int collectedCount() {
+        return targetItem == null ? 0 : Math.max(0, partner.countItem(targetItem) - initialTargetCount);
     }
 
     /** 返回当前任务可持久化的剩余超时 tick。 */

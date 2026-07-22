@@ -30,6 +30,7 @@ public final class AiPartnerMod implements ModInitializer {
         ModMenus.register();
         MaidSkinNetworking.registerServer();
         MaidConversationNetworking.registerServer();
+        MaidConversationService.register();
         ExperimentEventBridge.register();
         MaidCommand.register();
         ExperimentBatchRunner.register();

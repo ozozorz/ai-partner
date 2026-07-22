@@ -16,6 +16,7 @@ public final class TaskContract {
     private final List<String> goalPredicates;
     private final List<String> invariants;
     private final FailurePolicy failurePolicy;
+    private final ExecutionAnchor executionAnchor;
     private final long acceptedAtEpochMillis;
     private ContractStatus status;
     private FailureCode failureCode;
@@ -27,6 +28,7 @@ public final class TaskContract {
             List<String> goalPredicates,
             List<String> invariants,
             FailurePolicy failurePolicy,
+            ExecutionAnchor executionAnchor,
             long acceptedAtEpochMillis,
             ContractStatus status,
             FailureCode failureCode
@@ -37,6 +39,7 @@ public final class TaskContract {
         this.goalPredicates = immutablePredicates(goalPredicates, "goalPredicates");
         this.invariants = immutablePredicates(invariants, "invariants");
         this.failurePolicy = Objects.requireNonNull(failurePolicy, "failurePolicy");
+        this.executionAnchor = Objects.requireNonNull(executionAnchor, "executionAnchor");
         this.acceptedAtEpochMillis = acceptedAtEpochMillis;
         this.status = Objects.requireNonNull(status, "status");
         this.failureCode = Objects.requireNonNull(failureCode, "failureCode");
@@ -59,6 +62,30 @@ public final class TaskContract {
                 goalPredicates,
                 invariants,
                 failurePolicy,
+                ExecutionAnchor.unbound(),
+                System.currentTimeMillis(),
+                ContractStatus.ACCEPTED,
+                FailureCode.NONE
+        );
+    }
+
+    /** Creates a production contract anchored to the accepting owner, dimension, and origin. */
+    public static TaskContract accepted(
+            JobSpec job,
+            List<String> preconditions,
+            List<String> goalPredicates,
+            List<String> invariants,
+            FailurePolicy failurePolicy,
+            ExecutionAnchor executionAnchor
+    ) {
+        return new TaskContract(
+                UUID.randomUUID(),
+                job,
+                preconditions,
+                goalPredicates,
+                invariants,
+                failurePolicy,
+                executionAnchor,
                 System.currentTimeMillis(),
                 ContractStatus.ACCEPTED,
                 FailureCode.NONE
@@ -103,6 +130,7 @@ public final class TaskContract {
                 List.of(),
                 List.of("do_not_attack_friendly_entities"),
                 failurePolicy,
+                ExecutionAnchor.unbound(),
                 acceptedAtEpochMillis,
                 status,
                 failureCode
@@ -130,6 +158,34 @@ public final class TaskContract {
                 goalPredicates,
                 invariants,
                 failurePolicy,
+                ExecutionAnchor.unbound(),
+                acceptedAtEpochMillis,
+                status,
+                failureCode
+        );
+    }
+
+    /** Restores the complete executable contract boundary from the current persistence format. */
+    public static TaskContract restored(
+            UUID contractId,
+            JobSpec job,
+            List<String> preconditions,
+            List<String> goalPredicates,
+            List<String> invariants,
+            long acceptedAtEpochMillis,
+            ContractStatus status,
+            FailureCode failureCode,
+            FailurePolicy failurePolicy,
+            ExecutionAnchor executionAnchor
+    ) {
+        return new TaskContract(
+                contractId,
+                job,
+                preconditions,
+                goalPredicates,
+                invariants,
+                failurePolicy,
+                executionAnchor,
                 acceptedAtEpochMillis,
                 status,
                 failureCode
@@ -218,6 +274,10 @@ public final class TaskContract {
         return failurePolicy;
     }
 
+    public ExecutionAnchor executionAnchor() {
+        return executionAnchor;
+    }
+
     public long acceptedAtEpochMillis() {
         return acceptedAtEpochMillis;
     }
@@ -240,6 +300,27 @@ public final class TaskContract {
             if (maxLocalRetries < 0 || maxLlmReplans < 0 || timeoutSeconds <= 0) {
                 throw new IllegalArgumentException("Failure policy values are out of range");
             }
+        }
+    }
+
+    /** Persisted authority and spatial anchor used by runtime invariant evaluation. */
+    public record ExecutionAnchor(UUID ownerId, String dimensionId, long originPosition, boolean bound) {
+        private static final UUID UNBOUND_OWNER = new UUID(0L, 0L);
+
+        public ExecutionAnchor {
+            Objects.requireNonNull(ownerId, "ownerId");
+            dimensionId = Objects.requireNonNull(dimensionId, "dimensionId");
+            if (bound && dimensionId.isBlank()) {
+                throw new IllegalArgumentException("Bound execution anchor needs a dimension");
+            }
+        }
+
+        public static ExecutionAnchor bound(UUID ownerId, String dimensionId, long originPosition) {
+            return new ExecutionAnchor(ownerId, dimensionId, originPosition, true);
+        }
+
+        public static ExecutionAnchor unbound() {
+            return new ExecutionAnchor(UNBOUND_OWNER, "", 0L, false);
         }
     }
 }
