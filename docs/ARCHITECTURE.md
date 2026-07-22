@@ -1,10 +1,10 @@
-# AI Partner v0.9 架构说明
+# AI Partner v0.10 架构说明
 
 ## 1. 目标与范围
 
-v0.9 在 v0.8 复杂工作框架上加入“制作与工作补给”。本版本不调用、不接入也不扩张 LLM 或实验能力；它把菜单内 2×2 制作、服务端原版配方规划、工作台搜索/制作/放置和各工作物资需求接入既有工作控制器，同时保留 v0.8 的自然树、暴露矿石、原版熔炉、真实钓鱼、通用物流和成长边界。
+v0.10 在 v0.9“制作与工作补给”基础上加入“自然语言双驱动”。本版本把 R 键对话、`@女仆名称` 目标解析、本地离线规则与 OpenAI-compatible LLM 接入同一套类型化控制意图；模型只负责高层解释，既有任务、生活、工作与战斗控制器继续承担全部确定性执行和服务端校验。v0.4 `JobSpec` schema 仅保留给旧实验兼容代码，不再限制玩法控制面。
 
-当前基础版本保留此前生命周期、工作与防御能力，并在 v0.9 正式新增：
+当前基础版本保留此前生命周期、工作与防御能力，并在 v0.9/v0.10 正式新增：
 
 - 持久化主人索引、可配置数量上限和多女仆选择；
 - 任意原版可食用食物；
@@ -25,8 +25,12 @@ v0.9 在 v0.8 复杂工作框架上加入“制作与工作补给”。本版本
 - 仅接受普通有形/无形原版配方的递归制作规划、原子背包提交和制作剩余物处理；
 - 声明式工作物资需求与独立准备状态机，可搜索现成工作台，或制作、放置并导航到工作台完成 3×3 制作；
 - 徒手伐木降级，以及斧、镐、锹、剪刀、瓶、桶、火把和钓竿的自动补给。
+- 每个女仆独立持久化的 `LOCAL` / `LLM` 驱动设置，以及只保存环境变量名的 API Key 间接配置；
+- R 键对话框、命令配置入口、`@名称`/UUID 前缀目标绑定和两分钟澄清上下文；
+- 覆盖有限任务、持续工作、日程、防御、地点、区域、名称和查询的 v2 `MaidControlIntent`；
+- 异步 LLM 请求限速、替换取消、女仆 UUID 绑定、过期结果丢弃和本地紧急取消通道。
 
-命令型有限任务是：`FOLLOW`、`STAY`、`COLLECT_BLOCK`、`DEPOSIT_ITEM`、`TRANSFER_ITEM`、`COLLECT_AND_DEPOSIT` 和 `CANCEL`。17 种工作属于持续策略，不伪装成新的 LLM `JobType`；其中直接采集命令仍只支持橡木、白桦和云杉原木，通用物流则只移动女仆已经持有的请求物品。
+命令型有限任务是：`FOLLOW`、`STAY`、`COLLECT_BLOCK`、`DEPOSIT_ITEM`、`TRANSFER_ITEM`、`COLLECT_AND_DEPOSIT` 和 `CANCEL`。17 种工作属于持续策略，由 `SET_WORK_MODE` 控制意图选择，不伪装成有限 `JobType`；其中直接采集命令仍只支持橡木、白桦和云杉原木，通用物流则只移动女仆已经持有的请求物品。
 
 ## 2. 总体架构
 
@@ -35,8 +39,9 @@ flowchart TB
     subgraph Input["输入与交互"]
         Command["/maid 命令"]
         Menu["女仆 GUI"]
+        Dialogue["R 键对话框\n@名称目标前缀"]
         LocalParser["本地规则解析器"]
-        LLM["可选 LLM 意图解析"]
+        LLM["异步 LLM 意图解析"]
         SkinCommand["/maid-skin 客户端命令"]
     end
 
@@ -51,6 +56,9 @@ flowchart TB
         Work["MaidWorkController"]
         Supply["MaidWorkSupplyController"]
         Ownership["MaidOwnershipState"]
+        Conversation["MaidConversationService\n绑定/限速/澄清/过期丢弃"]
+        TypedIntent["MaidControlIntent\nv2 严格协议"]
+        Control["MaidControlService\n统一复验与路由"]
     end
 
     subgraph Gameplay["确定性玩法"]
@@ -78,8 +86,15 @@ flowchart TB
 
     Command --> Order
     Menu --> Order
-    LocalParser --> Order
-    LLM -. "只产生候选 JobSpec" .-> Order
+    Dialogue --> Conversation
+    Conversation --> LocalParser --> TypedIntent
+    Conversation --> LLM --> TypedIntent
+    TypedIntent --> Control
+    Control --> Order
+    Control --> Life
+    Control --> Work
+    Control --> Combat
+    Control --> Entity
     Order --> Contract --> Runtime
     Runtime --> Behavior
     Runtime --> TaskRegistry --> Tasks

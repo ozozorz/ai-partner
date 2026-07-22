@@ -26,7 +26,7 @@ import org.slf4j.LoggerFactory;
  * 服务端唯一活动契约的运行时，统一处理指令、任务、暂停、恢复、终态和持久化。
  */
 public final class MaidTaskRuntime {
-    public static final int CURRENT_DATA_VERSION = 4;
+    public static final int CURRENT_DATA_VERSION = 5;
     private static final Logger LOGGER = LoggerFactory.getLogger(MaidTaskRuntime.class);
 
     private final AiPartnerEntity partner;

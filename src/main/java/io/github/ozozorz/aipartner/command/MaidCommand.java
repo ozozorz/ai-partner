@@ -8,6 +8,7 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.github.ozozorz.aipartner.AiPartnerMod;
+import io.github.ozozorz.aipartner.conversation.MaidConversationService;
 import io.github.ozozorz.aipartner.contract.ContractDecision;
 import io.github.ozozorz.aipartner.contract.JobSpec;
 import io.github.ozozorz.aipartner.combat.CombatPolicy;
@@ -15,6 +16,8 @@ import io.github.ozozorz.aipartner.core.order.MaidOrderService;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
 import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
 import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
+import io.github.ozozorz.aipartner.control.MaidDriveMode;
+import io.github.ozozorz.aipartner.control.MaidDriverSettings;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.evaluation.OfflineEvaluationService;
 import io.github.ozozorz.aipartner.evaluation.OfflineLlmEvaluationService;
@@ -30,33 +33,24 @@ import io.github.ozozorz.aipartner.experiment.SystemVariant;
 import io.github.ozozorz.aipartner.job.JobType;
 import io.github.ozozorz.aipartner.job.AllowedTargets;
 import io.github.ozozorz.aipartner.job.ContainerTargets;
-import io.github.ozozorz.aipartner.llm.DialogueAct;
-import io.github.ozozorz.aipartner.llm.LlmCallResult;
-import io.github.ozozorz.aipartner.llm.LlmGateway;
 import io.github.ozozorz.aipartner.logging.ExperimentLogger;
 import io.github.ozozorz.aipartner.life.ActivityLocationType;
 import io.github.ozozorz.aipartner.parser.RuleJobParser;
 import io.github.ozozorz.aipartner.service.PartnerService;
-import io.github.ozozorz.aipartner.world.WorldStateSummary;
 import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.IdentifierArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.commands.SharedSuggestionProvider;
 
 /**
  * 注册 `/maid` 交互入口；所有动作先经过契约编译器，再交给实体执行。
  */
 public final class MaidCommand {
-    private static final ConcurrentHashMap<UUID, CompletableFuture<LlmCallResult>> PENDING_LLM_REQUESTS = new ConcurrentHashMap<>();
-
     private MaidCommand() {
     }
 
@@ -124,6 +118,7 @@ public final class MaidCommand {
                                                 builder
                                         ))
                                         .executes(MaidCommand::setCombatPolicy)))
+                        .then(createDriverCommand())
                         .then(createExperimentCommand())
                         .then(Commands.literal("follow").executes(context -> runBasicJob(context, JobType.FOLLOW)))
                         .then(Commands.literal("stay").executes(context -> runBasicJob(context, JobType.STAY)))
@@ -214,6 +209,91 @@ public final class MaidCommand {
             boolean set
     ) {
         return Commands.literal(literal).executes(context -> configureLocation(context, type, set));
+    }
+
+    /** Builds the per-maid local/LLM driver configuration command. */
+    private static LiteralArgumentBuilder<CommandSourceStack> createDriverCommand() {
+        return Commands.literal("driver")
+                .executes(MaidCommand::showDriverSettings)
+                .then(Commands.literal("mode")
+                        .then(Commands.argument("driver-mode", StringArgumentType.word())
+                                .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                                        java.util.Arrays.stream(MaidDriveMode.values())
+                                                .map(MaidDriveMode::serializedName),
+                                        builder
+                                ))
+                                .executes(MaidCommand::setDriverMode)))
+                .then(Commands.literal("api-key-env")
+                        .then(Commands.argument("environment-variable", StringArgumentType.word())
+                                .executes(MaidCommand::setDriverApiKeyEnvironmentVariable)));
+    }
+
+    private static int showDriverSettings(
+            CommandContext<CommandSourceStack> context
+    ) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity partner = requirePartner(context, player);
+        if (partner == null) {
+            return 0;
+        }
+        String readinessError = io.github.ozozorz.aipartner.llm.MaidControlLlmGateway
+                .getInstance()
+                .readinessError(partner.getLlmApiKeyEnvironmentVariable());
+        context.getSource().sendSuccess(() -> Component.translatable(
+                "message.ai-partner.driver.status",
+                partner.getName(),
+                partner.getDriveMode().serializedName(),
+                partner.getLlmApiKeyEnvironmentVariable(),
+                readinessError == null ? "READY" : readinessError
+        ), false);
+        return 1;
+    }
+
+    private static int setDriverMode(
+            CommandContext<CommandSourceStack> context
+    ) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity partner = requirePartner(context, player);
+        if (partner == null) {
+            return 0;
+        }
+        String rawMode = StringArgumentType.getString(context, "driver-mode");
+        MaidDriveMode mode = MaidDriveMode.parse(rawMode).orElse(null);
+        if (mode == null) {
+            context.getSource().sendFailure(Component.translatable("message.ai-partner.driver.invalid_mode", rawMode));
+            return 0;
+        }
+        partner.setDriveMode(mode);
+        MaidConversationService.cancelPending(player.getUUID());
+        context.getSource().sendSuccess(() -> Component.translatable(
+                "message.ai-partner.driver.mode_set",
+                partner.getName(),
+                mode.serializedName()
+        ), false);
+        return 1;
+    }
+
+    private static int setDriverApiKeyEnvironmentVariable(
+            CommandContext<CommandSourceStack> context
+    ) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        AiPartnerEntity partner = requirePartner(context, player);
+        if (partner == null) {
+            return 0;
+        }
+        String variableName = StringArgumentType.getString(context, "environment-variable");
+        if (!MaidDriverSettings.isValidEnvironmentVariableName(variableName)) {
+            context.getSource().sendFailure(Component.translatable("message.ai-partner.driver.invalid_env"));
+            return 0;
+        }
+        partner.setLlmApiKeyEnvironmentVariable(variableName);
+        MaidConversationService.cancelPending(player.getUUID());
+        context.getSource().sendSuccess(() -> Component.translatable(
+                "message.ai-partner.driver.env_set",
+                partner.getName(),
+                partner.getLlmApiKeyEnvironmentVariable()
+        ), false);
+        return 1;
     }
 
     /**
@@ -1020,102 +1100,7 @@ public final class MaidCommand {
     private static int handleMessage(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         String message = StringArgumentType.getString(context, "message");
         ServerPlayer player = context.getSource().getPlayerOrException();
-        AiPartnerEntity partner = PartnerService.findOwnedPartner(player).orElse(null);
-        if (partner == null) {
-            context.getSource().sendFailure(Component.translatable("message.ai-partner.not_found"));
-            return 0;
-        }
-
-        JobSpec localCandidate = RuleJobParser.parse(message).orElse(null);
-        if (localCandidate != null && localCandidate.type() == JobType.CANCEL) {
-            cancelPendingRequest(player.getUUID());
-            return compileAndRun(context, localCandidate, message);
-        }
-        if (!LlmGateway.getInstance().isEnabled()) {
-            if (localCandidate == null) {
-                ExperimentLogger.getInstance().logValidationDecision(
-                        "RULE_BT",
-                        partner,
-                        player,
-                        message,
-                        null,
-                        null,
-                        "NEEDS_CLARIFICATION"
-                );
-                context.getSource().sendFailure(Component.translatable("message.ai-partner.clarify"));
-                return 0;
-            }
-            return compileAndRun(context, localCandidate, message);
-        }
-
-        WorldStateSummary worldState = WorldStateSummary.capture(partner, player);
-        context.getSource().sendSuccess(() -> Component.translatable("message.ai-partner.thinking"), false);
-        submitLlmRequest(player, partner, message, worldState);
-        return 1;
-    }
-
-    private static void submitLlmRequest(
-            ServerPlayer player,
-            AiPartnerEntity partner,
-            String rawInstruction,
-            WorldStateSummary worldState
-    ) {
-        UUID playerId = player.getUUID();
-        MinecraftServer server = player.level().getServer();
-        CompletableFuture<LlmCallResult> request = LlmGateway.getInstance().interpret(rawInstruction, worldState);
-        CompletableFuture<LlmCallResult> previous = PENDING_LLM_REQUESTS.put(playerId, request);
-        if (previous != null) {
-            previous.cancel(true);
-        }
-
-        request.whenComplete((result, throwable) -> {
-            if (!PENDING_LLM_REQUESTS.remove(playerId, request)) {
-                return;
-            }
-            if (throwable != null || result == null) {
-                return;
-            }
-            ExperimentLogger.getInstance().logLlmInteraction(partner, player, rawInstruction, worldState, result);
-            server.execute(() -> handleLlmResult(server, playerId, rawInstruction, result));
-        });
-    }
-
-    private static void handleLlmResult(
-            MinecraftServer server,
-            UUID playerId,
-            String rawInstruction,
-            LlmCallResult result
-    ) {
-        ServerPlayer player = server.getPlayerList().getPlayer(playerId);
-        if (player == null) {
-            return;
-        }
-        if (!result.successful() || result.interpretation() == null) {
-            player.sendSystemMessage(Component.translatable(
-                    "message.ai-partner.llm_failed",
-                    result.errorCode() == null ? "UNKNOWN" : result.errorCode()
-            ));
-            return;
-        }
-
-        DialogueAct act = result.interpretation().dialogueAct();
-        switch (act) {
-            case PROPOSE_JOB -> applyCandidate(
-                    player,
-                    result.interpretation().candidateJob(),
-                    rawInstruction,
-                    "MAID_IBC"
-            );
-            case ASK_CLARIFICATION -> player.sendSystemMessage(Component.translatable(
-                    "message.ai-partner.model_clarification",
-                    sanitizeModelText(result.interpretation().clarificationQuestion())
-            ));
-            case REJECT_UNSUPPORTED -> player.sendSystemMessage(Component.translatable("message.ai-partner.model_rejected"));
-            case SOCIAL_REPLY -> player.sendSystemMessage(Component.translatable(
-                    "message.ai-partner.social_reply",
-                    sanitizeModelText(result.interpretation().clarificationQuestion())
-            ));
-        }
+        return MaidConversationService.submit(player, null, message) ? 1 : 0;
     }
 
     private static int compileAndRun(
@@ -1147,36 +1132,6 @@ public final class MaidCommand {
         return 1;
     }
 
-    private static boolean applyCandidate(
-            ServerPlayer player,
-            JobSpec candidate,
-            String rawInstruction,
-            String systemVariant
-    ) {
-        if (candidate == null) {
-            player.sendSystemMessage(Component.translatable("message.ai-partner.llm_failed", "MISSING_CANDIDATE"));
-            return false;
-        }
-        AiPartnerEntity partner = PartnerService.findOwnedPartner(player).orElse(null);
-        if (partner == null) {
-            player.sendSystemMessage(Component.translatable("message.ai-partner.not_found"));
-            return false;
-        }
-        ContractDecision decision = MaidOrderService.submit(
-                partner,
-                player,
-                candidate,
-                rawInstruction,
-                TaskExecutionPolicy.fromLegacySource(systemVariant)
-        );
-        if (!decision.accepted()) {
-            player.sendSystemMessage(Component.translatable(decision.messageKey()));
-            return false;
-        }
-        player.sendSystemMessage(Component.translatable(responseKey(candidate, decision)));
-        return true;
-    }
-
     private static String responseKey(JobSpec candidate, ContractDecision decision) {
         return switch (candidate.type()) {
             case FOLLOW -> "message.ai-partner.following";
@@ -1189,18 +1144,7 @@ public final class MaidCommand {
         };
     }
 
-    private static String sanitizeModelText(String text) {
-        if (text == null || text.isBlank()) {
-            return "...";
-        }
-        String sanitized = text.replaceAll("[\\r\\n\\t]+", " ").strip();
-        return sanitized.length() <= 200 ? sanitized : sanitized.substring(0, 200);
-    }
-
     private static void cancelPendingRequest(UUID playerId) {
-        CompletableFuture<LlmCallResult> request = PENDING_LLM_REQUESTS.remove(playerId);
-        if (request != null) {
-            request.cancel(true);
-        }
+        MaidConversationService.cancelPending(playerId);
     }
 }

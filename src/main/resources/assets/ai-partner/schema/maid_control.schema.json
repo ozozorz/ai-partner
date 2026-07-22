@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ai-partner/maid_control.schema.json",
+  "title": "AI Partner maid control protocol",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "dialogue_act", "intent", "response_text"],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "dialogue_act": {
+      "enum": ["PROPOSE_INTENT", "ASK_CLARIFICATION", "REJECT_UNSUPPORTED", "SOCIAL_REPLY"]
+    },
+    "intent": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/runTask"},
+        {"$ref": "#/$defs/setWorkMode"},
+        {"$ref": "#/$defs/setSchedule"},
+        {"$ref": "#/$defs/setCombatPolicy"},
+        {"$ref": "#/$defs/returnHome"},
+        {"$ref": "#/$defs/configureLocation"},
+        {"$ref": "#/$defs/setHomeBound"},
+        {"$ref": "#/$defs/setRadius"},
+        {"$ref": "#/$defs/rename"},
+        {"$ref": "#/$defs/queryStatus"},
+        {"$ref": "#/$defs/queryInventory"},
+        {"$ref": "#/$defs/retrieveInventory"}
+      ]
+    },
+    "response_text": {"type": ["string", "null"], "maxLength": 240}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"dialogue_act": {"const": "PROPOSE_INTENT"}}},
+      "then": {
+        "properties": {
+          "intent": {"not": {"type": "null"}},
+          "response_text": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"dialogue_act": {"enum": ["ASK_CLARIFICATION", "SOCIAL_REPLY"]}}},
+      "then": {
+        "properties": {
+          "intent": {"type": "null"},
+          "response_text": {"type": "string", "minLength": 1, "maxLength": 240}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"dialogue_act": {"const": "REJECT_UNSUPPORTED"}}},
+      "then": {
+        "properties": {
+          "intent": {"type": "null"},
+          "response_text": {"type": "null"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "runTask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "job_type", "target", "quantity", "radius"],
+      "properties": {
+        "kind": {"const": "RUN_TASK"},
+        "job_type": {
+          "enum": ["FOLLOW", "STAY", "CANCEL", "COLLECT_BLOCK", "DEPOSIT_ITEM", "COLLECT_AND_DEPOSIT", "TRANSFER_ITEM"]
+        },
+        "target": {"type": "string", "maxLength": 100},
+        "quantity": {"type": "integer", "minimum": 0, "maximum": 64},
+        "radius": {"type": "integer", "minimum": 0, "maximum": 24}
+      }
+    },
+    "setWorkMode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "mode"],
+      "properties": {
+        "kind": {"const": "SET_WORK_MODE"},
+        "mode": {
+          "enum": ["none", "farmer", "sugar-cane", "melon", "cocoa", "forager", "snow-clearer", "beekeeper", "shearer", "milker", "caregiver", "breeder", "torch-bearer", "firefighter", "lumberjack", "miner", "smelter", "fisher"]
+        }
+      }
+    },
+    "setSchedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "schedule"],
+      "properties": {
+        "kind": {"const": "SET_SCHEDULE"},
+        "schedule": {"enum": ["DAY_SHIFT", "NIGHT_SHIFT", "ALL_DAY"]}
+      }
+    },
+    "setCombatPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "policy"],
+      "properties": {
+        "kind": {"const": "SET_COMBAT_POLICY"},
+        "policy": {"enum": ["off", "self-defense", "defend-owner"]}
+      }
+    },
+    "returnHome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {"kind": {"const": "RETURN_HOME"}}
+    },
+    "configureLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "location", "clear"],
+      "properties": {
+        "kind": {"const": "CONFIGURE_LOCATION"},
+        "location": {"enum": ["WORK", "LEISURE", "SLEEP"]},
+        "clear": {"type": "boolean"}
+      }
+    },
+    "setHomeBound": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "enabled"],
+      "properties": {
+        "kind": {"const": "SET_HOME_BOUND"},
+        "enabled": {"type": "boolean"}
+      }
+    },
+    "setRadius": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "radius"],
+      "properties": {
+        "kind": {"const": "SET_RADIUS"},
+        "radius": {"type": "integer", "minimum": 1, "maximum": 64}
+      }
+    },
+    "rename": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": {"const": "RENAME"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 32}
+      }
+    },
+    "queryStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {"kind": {"const": "QUERY_STATUS"}}
+    },
+    "queryInventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {"kind": {"const": "QUERY_INVENTORY"}}
+    },
+    "retrieveInventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {"kind": {"const": "RETRIEVE_INVENTORY"}}
+    }
+  }
+}

@@ -8,7 +8,10 @@ import io.github.ozozorz.aipartner.core.behavior.MaidBehaviorController;
 import io.github.ozozorz.aipartner.core.behavior.ManualDirective;
 import io.github.ozozorz.aipartner.core.task.MaidTaskRuntime;
 import io.github.ozozorz.aipartner.core.task.TaskExecutionPolicy;
+import io.github.ozozorz.aipartner.config.AiPartnerConfig;
 import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
+import io.github.ozozorz.aipartner.control.MaidDriveMode;
+import io.github.ozozorz.aipartner.control.MaidDriverSettings;
 import io.github.ozozorz.aipartner.entity.goal.AiPartnerFollowOwnerGoal;
 import io.github.ozozorz.aipartner.entity.goal.AiPartnerIdleWanderGoal;
 import io.github.ozozorz.aipartner.entity.goal.AiPartnerMeleeCombatGoal;
@@ -101,6 +104,14 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             AiPartnerEntity.class,
             EntityDataSerializers.STRING
     );
+    private static final EntityDataAccessor<Integer> DATA_DRIVE_MODE = SynchedEntityData.defineId(
+            AiPartnerEntity.class,
+            EntityDataSerializers.INT
+    );
+    private static final EntityDataAccessor<String> DATA_LLM_API_KEY_ENV = SynchedEntityData.defineId(
+            AiPartnerEntity.class,
+            EntityDataSerializers.STRING
+    );
 
     private final SimpleContainer inventory = new SimpleContainer(MaidInventoryPersistence.STORAGE_SLOT_COUNT);
     private final MaidGrowthData growthData = new MaidGrowthData();
@@ -179,6 +190,8 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         builder.define(DATA_SPEECH_BUBBLE, Optional.empty());
         builder.define(DATA_SPEECH_BUBBLE_UNTIL, 0L);
         builder.define(DATA_SKIN_HASH, "");
+        builder.define(DATA_DRIVE_MODE, MaidDriveMode.LOCAL.ordinal());
+        builder.define(DATA_LLM_API_KEY_ENV, defaultApiKeyEnvironmentVariable());
     }
 
     /**
@@ -730,6 +743,8 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         if (!getSkinHash().isEmpty()) {
             output.putString("MaidSkinHash", getSkinHash());
         }
+        output.putString("MaidDriveMode", getDriveMode().serializedName());
+        output.putString("MaidLlmApiKeyEnvironmentVariable", getLlmApiKeyEnvironmentVariable());
     }
 
     @Override
@@ -753,6 +768,14 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         growthController.load(input);
         appliedGrowthLevel = -1;
         setSkinHash(input.getStringOr("MaidSkinHash", ""));
+        setDriveMode(MaidDriveMode.fromSavedName(input.getStringOr("MaidDriveMode", "local")));
+        String environmentVariable = input.getStringOr(
+                "MaidLlmApiKeyEnvironmentVariable",
+                defaultApiKeyEnvironmentVariable()
+        );
+        setLlmApiKeyEnvironmentVariable(MaidDriverSettings.isValidEnvironmentVariableName(environmentVariable)
+                ? environmentVariable
+                : defaultApiKeyEnvironmentVariable());
         ownershipRegistered = false;
     }
 
@@ -835,12 +858,44 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         return entityData.get(DATA_SKIN_HASH);
     }
 
+    /** Returns the selected natural-language interpretation driver. */
+    public MaidDriveMode getDriveMode() {
+        int ordinal = entityData.get(DATA_DRIVE_MODE);
+        MaidDriveMode[] modes = MaidDriveMode.values();
+        return ordinal >= 0 && ordinal < modes.length ? modes[ordinal] : MaidDriveMode.LOCAL;
+    }
+
+    /** Changes only the high-level interpreter; world actions remain server-authoritative. */
+    public void setDriveMode(MaidDriveMode mode) {
+        entityData.set(DATA_DRIVE_MODE, java.util.Objects.requireNonNull(mode, "mode").ordinal());
+    }
+
+    /** Returns an environment variable name, never the API key stored under that name. */
+    public String getLlmApiKeyEnvironmentVariable() {
+        return entityData.get(DATA_LLM_API_KEY_ENV);
+    }
+
+    /** Persists only a validated environment variable identifier. */
+    public void setLlmApiKeyEnvironmentVariable(String variableName) {
+        entityData.set(
+                DATA_LLM_API_KEY_ENV,
+                MaidDriverSettings.requireEnvironmentVariableName(variableName)
+        );
+    }
+
     /**
      * 只接受服务端验证器生成的 SHA-256 十六进制标识；空值恢复 Alex 外观。
      */
     public void setSkinHash(String hash) {
         String normalized = hash == null ? "" : hash.toLowerCase(java.util.Locale.ROOT);
         entityData.set(DATA_SKIN_HASH, normalized.matches("[0-9a-f]{64}") ? normalized : "");
+    }
+
+    private static String defaultApiKeyEnvironmentVariable() {
+        String configured = AiPartnerConfig.get().apiKeyEnvironmentVariable();
+        return MaidDriverSettings.isValidEnvironmentVariableName(configured)
+                ? configured.strip()
+                : "DEEPSEEK_API_KEY";
     }
 
     private void dropPendingMigrationItems() {
