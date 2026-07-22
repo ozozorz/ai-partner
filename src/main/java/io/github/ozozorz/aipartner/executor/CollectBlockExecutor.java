@@ -43,7 +43,7 @@ public final class CollectBlockExecutor {
     private int countBeforeBreak;
     private int stateTicks;
     private int pathFailures;
-    private long deadlineGameTime;
+    private final GameTimeDeadline timeout = new GameTimeDeadline();
 
     public CollectBlockExecutor(AiPartnerEntity partner) {
         this.partner = partner;
@@ -54,7 +54,7 @@ public final class CollectBlockExecutor {
      * 使用自定义阶段监听器启动，供固定组合任务复用采集状态机。
      */
     public void start(TaskContract taskContract, TaskExecutionListener listener) {
-        start(taskContract, null, listener);
+        start(taskContract, null, null, listener);
     }
 
     /**
@@ -63,14 +63,16 @@ public final class CollectBlockExecutor {
     public void restore(
             TaskContract taskContract,
             int savedInitialTargetCount,
+            long savedRemainingTimeoutTicks,
             TaskExecutionListener listener
     ) {
-        start(taskContract, savedInitialTargetCount, listener);
+        start(taskContract, savedInitialTargetCount, savedRemainingTimeoutTicks, listener);
     }
 
     private void start(
             TaskContract taskContract,
             Integer initialCountOverride,
+            Long remainingTimeoutOverride,
             TaskExecutionListener listener
     ) {
         stop();
@@ -86,7 +88,12 @@ public final class CollectBlockExecutor {
         this.initialTargetCount = initialCountOverride == null
                 ? partner.countItem(targetItem)
                 : initialCountOverride;
-        this.deadlineGameTime = partner.level().getGameTime() + taskContract.failurePolicy().timeoutSeconds() * 20L;
+        long fullTimeoutTicks = taskContract.failurePolicy().timeoutSeconds() * 20L;
+        if (remainingTimeoutOverride == null) {
+            timeout.start(partner.level().getGameTime(), fullTimeoutTicks);
+        } else {
+            timeout.restore(partner.level().getGameTime(), fullTimeoutTicks, remainingTimeoutOverride);
+        }
         transitionTo(State.SEARCH_TARGET);
     }
 
@@ -97,7 +104,7 @@ public final class CollectBlockExecutor {
         if (!isRunning()) {
             return;
         }
-        if (level.getGameTime() >= deadlineGameTime) {
+        if (timeout.isExpired(level.getGameTime())) {
             fail(FailureCode.TIMEOUT);
             return;
         }
@@ -145,7 +152,7 @@ public final class CollectBlockExecutor {
         countBeforeBreak = 0;
         stateTicks = 0;
         pathFailures = 0;
-        deadlineGameTime = 0L;
+        timeout.clear();
         unavailableTargets.clear();
         resultListener = null;
     }
@@ -166,7 +173,7 @@ public final class CollectBlockExecutor {
      */
     public void pauseForMenuTick() {
         if (isRunning()) {
-            deadlineGameTime++;
+            timeout.pauseOneTick();
         }
     }
 
@@ -176,6 +183,11 @@ public final class CollectBlockExecutor {
 
     public int initialTargetCount() {
         return initialTargetCount;
+    }
+
+    /** 返回当前任务可持久化的剩余超时 tick。 */
+    public long remainingTimeoutTicks() {
+        return timeout.remainingTicks(partner.level().getGameTime());
     }
 
     private void searchForTarget(ServerLevel level) {
@@ -245,7 +257,7 @@ public final class CollectBlockExecutor {
             fail(FailureCode.MISSING_TOOL);
             return;
         }
-        if (!partner.canStore(targetItem)) {
+        if (!partner.canStore(targetItem, remainingQuantity())) {
             fail(FailureCode.INVENTORY_FULL);
             return;
         }
@@ -286,7 +298,7 @@ public final class CollectBlockExecutor {
             transitionTo(State.CHECK_GOAL);
             return;
         }
-        if (!partner.canStore(targetItem)) {
+        if (!partner.canStore(targetItem, remainingQuantity())) {
             fail(FailureCode.INVENTORY_FULL);
             return;
         }
@@ -322,6 +334,14 @@ public final class CollectBlockExecutor {
                 && partner.countItem(targetItem) - initialTargetCount >= contract.job().quantity();
     }
 
+    /**
+     * 返回完成契约还需收集的数量，用于在每次世界修改前持续验证完整剩余容量。
+     */
+    private int remainingQuantity() {
+        int collected = Math.max(0, partner.countItem(targetItem) - initialTargetCount);
+        return Math.max(1, contract.job().quantity() - collected);
+    }
+
     private boolean targetStillExists(ServerLevel level) {
         return targetPosition != null && level.getBlockState(targetPosition).getBlock() == targetBlock;
     }
@@ -348,11 +368,10 @@ public final class CollectBlockExecutor {
      * 完整系统可重新搜索替代目标；LLM-Schema 与 A2 在动作级安全检查处直接失败。
      */
     private void handleUnavailableTarget(FailureCode failureCode) {
-        if (!partner.allowsLocalRecovery()) {
+        if (!partner.allowsLocalRecovery() || !partner.tryRecordRuntimeRecovery(failureCode.name())) {
             fail(failureCode);
             return;
         }
-        partner.recordRuntimeRecovery(failureCode.name());
         retryWithAnotherTarget();
     }
 

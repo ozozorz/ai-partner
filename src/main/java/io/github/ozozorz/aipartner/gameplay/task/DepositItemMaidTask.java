@@ -15,6 +15,7 @@ import net.minecraft.world.level.storage.ValueOutput;
 public class DepositItemMaidTask implements MaidTask {
     public static final String ID = "deposit_item";
     private static final String MOVED_COUNT = "movedCount";
+    private static final String REMAINING_TIMEOUT_TICKS = "remainingTimeoutTicks";
 
     private final DepositItemExecutor executor;
     private final String taskId;
@@ -44,6 +45,7 @@ public class DepositItemMaidTask implements MaidTask {
         executor.restore(
                 context.contract(),
                 snapshot.integer(MOVED_COUNT, 0),
+                snapshot.longValue(REMAINING_TIMEOUT_TICKS, fullTimeoutTicks(context.contract())),
                 new ExecutorResultAdapter(context.resultSink())
         );
     }
@@ -80,8 +82,9 @@ public class DepositItemMaidTask implements MaidTask {
 
     @Override
     public MaidTaskSnapshot snapshot() {
-        return MaidTaskSnapshot.builder(1)
+        return MaidTaskSnapshot.builder(2)
                 .putInt(MOVED_COUNT, executor.movedCount())
+                .putLong(REMAINING_TIMEOUT_TICKS, executor.remainingTimeoutTicks())
                 .build();
     }
 
@@ -95,5 +98,9 @@ public class DepositItemMaidTask implements MaidTask {
     @Override
     public void writeLegacySnapshot(ValueOutput output, MaidTaskSnapshot snapshot) {
         output.putInt("DepositMovedCount", snapshot.integer(MOVED_COUNT, 0));
+    }
+
+    private static long fullTimeoutTicks(io.github.ozozorz.aipartner.contract.TaskContract contract) {
+        return contract.failurePolicy().timeoutSeconds() * 20L;
     }
 }

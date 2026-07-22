@@ -19,7 +19,7 @@ public final class CollectAndDepositExecutor {
     private Phase phase = Phase.IDLE;
     private @Nullable TaskContract contract;
     private @Nullable TaskExecutionListener resultListener;
-    private long deadlineGameTime;
+    private final GameTimeDeadline timeout = new GameTimeDeadline();
 
     public CollectAndDepositExecutor(
             AiPartnerEntity partner,
@@ -38,7 +38,10 @@ public final class CollectAndDepositExecutor {
         stop();
         contract = taskContract;
         resultListener = Objects.requireNonNull(listener, "listener");
-        deadlineGameTime = partner.level().getGameTime() + taskContract.failurePolicy().timeoutSeconds() * 20L;
+        timeout.start(
+                partner.level().getGameTime(),
+                taskContract.failurePolicy().timeoutSeconds() * 20L
+        );
         transitionTo(Phase.COLLECTING);
         collectExecutor.start(taskContract, collectListener);
     }
@@ -51,18 +54,28 @@ public final class CollectAndDepositExecutor {
             Phase savedPhase,
             int savedCollectInitialTargetCount,
             int savedDepositMovedCount,
+            long savedRemainingTimeoutTicks,
             TaskExecutionListener listener
     ) {
         stop();
         contract = taskContract;
         resultListener = Objects.requireNonNull(listener, "listener");
-        deadlineGameTime = partner.level().getGameTime() + taskContract.failurePolicy().timeoutSeconds() * 20L;
+        timeout.restore(
+                partner.level().getGameTime(),
+                taskContract.failurePolicy().timeoutSeconds() * 20L,
+                savedRemainingTimeoutTicks
+        );
         if (savedPhase == Phase.DEPOSITING) {
             transitionTo(Phase.DEPOSITING);
-            depositExecutor.restore(taskContract, savedDepositMovedCount, depositListener);
+            depositExecutor.restore(taskContract, savedDepositMovedCount, savedRemainingTimeoutTicks, depositListener);
         } else {
             transitionTo(Phase.COLLECTING);
-            collectExecutor.restore(taskContract, savedCollectInitialTargetCount, collectListener);
+            collectExecutor.restore(
+                    taskContract,
+                    savedCollectInitialTargetCount,
+                    savedRemainingTimeoutTicks,
+                    collectListener
+            );
         }
     }
 
@@ -73,7 +86,7 @@ public final class CollectAndDepositExecutor {
         if (!isRunning()) {
             return;
         }
-        if (level.getGameTime() >= deadlineGameTime) {
+        if (timeout.isExpired(level.getGameTime())) {
             fail(FailureCode.TIMEOUT);
             return;
         }
@@ -91,7 +104,7 @@ public final class CollectAndDepositExecutor {
         if (!isRunning()) {
             return;
         }
-        deadlineGameTime++;
+        timeout.pauseOneTick();
         if (phase == Phase.COLLECTING) {
             collectExecutor.pauseForMenuTick();
         } else if (phase == Phase.DEPOSITING) {
@@ -108,7 +121,7 @@ public final class CollectAndDepositExecutor {
         phase = Phase.IDLE;
         contract = null;
         resultListener = null;
-        deadlineGameTime = 0L;
+        timeout.clear();
     }
 
     public boolean isRunning() {
@@ -125,6 +138,11 @@ public final class CollectAndDepositExecutor {
 
     public int depositMovedCount() {
         return depositExecutor.movedCount();
+    }
+
+    /** 返回父契约可持久化的剩余总超时 tick。 */
+    public long remainingTimeoutTicks() {
+        return timeout.remainingTicks(partner.level().getGameTime());
     }
 
     /**

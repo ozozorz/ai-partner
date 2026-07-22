@@ -23,6 +23,7 @@ import io.github.ozozorz.aipartner.growth.MaidGrowthController;
 import io.github.ozozorz.aipartner.growth.MaidGrowthProgression;
 import io.github.ozozorz.aipartner.inventory.MaidInventoryPersistence;
 import io.github.ozozorz.aipartner.inventory.AiPartnerMenu;
+import io.github.ozozorz.aipartner.inventory.InventoryCapacity;
 import io.github.ozozorz.aipartner.life.ActivityLocation;
 import io.github.ozozorz.aipartner.life.ActivityLocationType;
 import io.github.ozozorz.aipartner.life.MaidFeedingService;
@@ -232,8 +233,8 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         return taskRuntime.localRecoveryEnabled();
     }
 
-    public void recordRuntimeRecovery(String reason) {
-        taskRuntime.recordRuntimeRecovery(reason);
+    public boolean tryRecordRuntimeRecovery(String reason) {
+        return taskRuntime.tryRecordRuntimeRecovery(reason);
     }
 
     public int getRuntimeRecoveryCount() {
@@ -436,11 +437,16 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         return count;
     }
 
-    /**
-     * 检查背包是否有至少一个可放入目标物品的槽位。
-     */
+    /** 检查背包是否还能放入至少一个目标物品。 */
     public boolean canStore(Item item) {
-        return inventory.canAddItem(new ItemStack(item));
+        return canStore(item, 1);
+    }
+
+    /**
+     * 按完整请求数量检查背包容量，避免契约接受只能容纳第一件物品的采集任务。
+     */
+    public boolean canStore(Item item, int quantity) {
+        return InventoryCapacity.canAccept(inventory, new ItemStack(item), quantity);
     }
 
     /**

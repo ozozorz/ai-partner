@@ -1,6 +1,7 @@
 package io.github.ozozorz.aipartner.job;
 
 import io.github.ozozorz.aipartner.core.action.TransferItemAction;
+import io.github.ozozorz.aipartner.inventory.InventoryCapacity;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -87,22 +88,7 @@ public final class ContainerTargets {
      * 计算容器对同组件物品的可用容量是否满足给定数量。
      */
     public static boolean hasCapacity(Container container, ItemStack prototype, int quantity) {
-        int capacity = 0;
-        for (int slot = 0; slot < container.getContainerSize(); slot++) {
-            ItemStack existing = container.getItem(slot);
-            if (existing.isEmpty()) {
-                if (container.canPlaceItem(slot, prototype)) {
-                    capacity += container.getMaxStackSize(prototype);
-                }
-            } else if (ItemStack.isSameItemSameComponents(existing, prototype)
-                    && container.canPlaceItem(slot, prototype)) {
-                capacity += Math.max(0, container.getMaxStackSize(existing) - existing.getCount());
-            }
-            if (capacity >= quantity) {
-                return true;
-            }
-        }
-        return false;
+        return InventoryCapacity.canAccept(container, prototype, quantity);
     }
 
     /**

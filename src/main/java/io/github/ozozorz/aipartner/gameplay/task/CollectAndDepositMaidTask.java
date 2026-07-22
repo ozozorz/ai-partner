@@ -23,6 +23,7 @@ public final class CollectAndDepositMaidTask implements MaidTask {
     private static final String COLLECT_INITIAL_TARGET_COUNT = "collectInitialTargetCount";
     private static final String DEPOSIT_MOVED_COUNT = "depositMovedCount";
     private static final String TOOL_LEASE_SOURCE_SLOT = "toolLeaseSourceSlot";
+    private static final String REMAINING_TIMEOUT_TICKS = "remainingTimeoutTicks";
 
     private final AiPartnerEntity partner;
     private final CollectBlockExecutor collectExecutor;
@@ -66,6 +67,7 @@ public final class CollectAndDepositMaidTask implements MaidTask {
                 savedPhase,
                 snapshot.integer(COLLECT_INITIAL_TARGET_COUNT, 0),
                 snapshot.integer(DEPOSIT_MOVED_COUNT, 0),
+                snapshot.longValue(REMAINING_TIMEOUT_TICKS, fullTimeoutTicks(context.contract())),
                 new ExecutorResultAdapter(context.resultSink())
         );
     }
@@ -122,10 +124,11 @@ public final class CollectAndDepositMaidTask implements MaidTask {
 
     @Override
     public MaidTaskSnapshot snapshot() {
-        return MaidTaskSnapshot.builder(1)
+        return MaidTaskSnapshot.builder(2)
                 .putString(PHASE, executor.phase().name())
                 .putInt(COLLECT_INITIAL_TARGET_COUNT, executor.collectInitialTargetCount())
                 .putInt(DEPOSIT_MOVED_COUNT, executor.depositMovedCount())
+                .putLong(REMAINING_TIMEOUT_TICKS, executor.remainingTimeoutTicks())
                 .putInt(
                         TOOL_LEASE_SOURCE_SLOT,
                         toolLease == null ? EquipmentLease.NO_SOURCE_SLOT : toolLease.sourceSlot()
@@ -174,5 +177,9 @@ public final class CollectAndDepositMaidTask implements MaidTask {
 
     private static boolean isAxe(net.minecraft.world.item.ItemStack stack) {
         return !stack.isEmpty() && stack.typeHolder().is(ItemTags.AXES);
+    }
+
+    private static long fullTimeoutTicks(io.github.ozozorz.aipartner.contract.TaskContract contract) {
+        return contract.failurePolicy().timeoutSeconds() * 20L;
     }
 }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.invalid/ai-partner/maid_control.schema.json",
+  "$id": "https://github.com/ozozorz/ai-partner/schema/maid_control.schema.json",
   "title": "AI Partner maid control protocol",
   "type": "object",
   "additionalProperties": false,
@@ -44,7 +44,12 @@
       "then": {
         "properties": {
           "intent": {"type": "null"},
-          "response_text": {"type": "string", "minLength": 1, "maxLength": 240}
+          "response_text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "[^\\u0009-\\u000D\\u001C-\\u0020\\u1680\\u2000-\\u2006\\u2008-\\u200A\\u2028-\\u2029\\u205F\\u3000]"
+          }
         }
       }
     },
@@ -71,7 +76,34 @@
         "target": {"type": "string", "maxLength": 100},
         "quantity": {"type": "integer", "minimum": 0, "maximum": 64},
         "radius": {"type": "integer", "minimum": 0, "maximum": 24}
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "job_type": {"enum": ["FOLLOW", "STAY", "CANCEL"]}
+            },
+            "required": ["job_type"]
+          },
+          "then": {
+            "properties": {
+              "target": {"const": ""},
+              "quantity": {"const": 0},
+              "radius": {"const": 0}
+            }
+          },
+          "else": {
+            "properties": {
+              "target": {
+                "minLength": 1,
+                "pattern": "[^\\u0009-\\u000D\\u001C-\\u0020\\u1680\\u2000-\\u2006\\u2008-\\u200A\\u2028-\\u2029\\u205F\\u3000]"
+              },
+              "quantity": {"minimum": 1},
+              "radius": {"minimum": 1}
+            }
+          }
+        }
+      ]
     },
     "setWorkMode": {
       "type": "object",
@@ -142,7 +174,19 @@
       "required": ["kind", "name"],
       "properties": {
         "kind": {"const": "RENAME"},
-        "name": {"type": "string", "minLength": 1, "maxLength": 32}
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "allOf": [
+            {
+              "pattern": "[^\\u0009-\\u000D\\u001C-\\u0020\\u1680\\u2000-\\u2006\\u2008-\\u200A\\u2028-\\u2029\\u205F\\u3000]"
+            },
+            {
+              "not": {"pattern": "[\\u0000-\\u001F\\u007F-\\u009F]"}
+            }
+          ]
+        }
       }
     },
     "queryStatus": {

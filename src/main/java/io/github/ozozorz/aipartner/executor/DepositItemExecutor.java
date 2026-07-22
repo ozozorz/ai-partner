@@ -39,7 +39,7 @@ public final class DepositItemExecutor {
     private int stateTicks;
     private int pathFailures;
     private int movedCount;
-    private long deadlineGameTime;
+    private final GameTimeDeadline timeout = new GameTimeDeadline();
     private boolean sawFullContainer;
 
     public DepositItemExecutor(AiPartnerEntity partner) {
@@ -51,17 +51,27 @@ public final class DepositItemExecutor {
      * 使用自定义阶段监听器启动，供固定组合任务复用存放状态机。
      */
     public void start(TaskContract taskContract, TaskExecutionListener listener) {
-        start(taskContract, 0, listener);
+        start(taskContract, 0, null, listener);
     }
 
     /**
      * 使用保存的已移动数量和自定义监听器恢复组合任务存放阶段。
      */
-    public void restore(TaskContract taskContract, int savedMovedCount, TaskExecutionListener listener) {
-        start(taskContract, savedMovedCount, listener);
+    public void restore(
+            TaskContract taskContract,
+            int savedMovedCount,
+            long savedRemainingTimeoutTicks,
+            TaskExecutionListener listener
+    ) {
+        start(taskContract, savedMovedCount, savedRemainingTimeoutTicks, listener);
     }
 
-    private void start(TaskContract taskContract, int initialMovedCount, TaskExecutionListener listener) {
+    private void start(
+            TaskContract taskContract,
+            int initialMovedCount,
+            Long remainingTimeoutOverride,
+            TaskExecutionListener listener
+    ) {
         stop();
         resultListener = Objects.requireNonNull(listener, "listener");
         contract = taskContract;
@@ -72,7 +82,12 @@ public final class DepositItemExecutor {
         }
         origin = partner.blockPosition().immutable();
         movedCount = Math.max(0, initialMovedCount);
-        deadlineGameTime = partner.level().getGameTime() + taskContract.failurePolicy().timeoutSeconds() * 20L;
+        long fullTimeoutTicks = taskContract.failurePolicy().timeoutSeconds() * 20L;
+        if (remainingTimeoutOverride == null) {
+            timeout.start(partner.level().getGameTime(), fullTimeoutTicks);
+        } else {
+            timeout.restore(partner.level().getGameTime(), fullTimeoutTicks, remainingTimeoutOverride);
+        }
         transitionTo(State.SEARCH_CONTAINER);
     }
 
@@ -83,7 +98,7 @@ public final class DepositItemExecutor {
         if (!isRunning()) {
             return;
         }
-        if (level.getGameTime() >= deadlineGameTime) {
+        if (timeout.isExpired(level.getGameTime())) {
             fail(FailureCode.TIMEOUT);
             return;
         }
@@ -119,12 +134,17 @@ public final class DepositItemExecutor {
      */
     public void pauseForMenuTick() {
         if (isRunning()) {
-            deadlineGameTime++;
+            timeout.pauseOneTick();
         }
     }
 
     public int movedCount() {
         return movedCount;
+    }
+
+    /** 返回当前任务可持久化的剩余超时 tick。 */
+    public long remainingTimeoutTicks() {
+        return timeout.remainingTicks(partner.level().getGameTime());
     }
 
     public String stateName() {
@@ -144,7 +164,7 @@ public final class DepositItemExecutor {
         stateTicks = 0;
         pathFailures = 0;
         movedCount = 0;
-        deadlineGameTime = 0L;
+        timeout.clear();
         sawFullContainer = false;
         unavailableContainers.clear();
         resultListener = null;
@@ -314,11 +334,10 @@ public final class DepositItemExecutor {
      * 完整系统可切换到其他容器；无监控消融只执行安全终止，不进行恢复。
      */
     private void handleUnavailableContainer(FailureCode failureCode) {
-        if (!partner.allowsLocalRecovery()) {
+        if (!partner.allowsLocalRecovery() || !partner.tryRecordRuntimeRecovery(failureCode.name())) {
             fail(failureCode);
             return;
         }
-        partner.recordRuntimeRecovery(failureCode.name());
         retryWithAnotherContainer();
     }
 

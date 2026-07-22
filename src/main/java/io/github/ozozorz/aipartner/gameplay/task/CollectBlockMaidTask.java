@@ -19,6 +19,7 @@ public final class CollectBlockMaidTask implements MaidTask {
     public static final String ID = "collect_block";
     private static final String INITIAL_TARGET_COUNT = "initialTargetCount";
     private static final String TOOL_LEASE_SOURCE_SLOT = "toolLeaseSourceSlot";
+    private static final String REMAINING_TIMEOUT_TICKS = "remainingTimeoutTicks";
 
     private final AiPartnerEntity partner;
     private final CollectBlockExecutor executor;
@@ -50,6 +51,7 @@ public final class CollectBlockMaidTask implements MaidTask {
         executor.restore(
                 context.contract(),
                 snapshot.integer(INITIAL_TARGET_COUNT, 0),
+                snapshot.longValue(REMAINING_TIMEOUT_TICKS, fullTimeoutTicks(context.contract())),
                 new ExecutorResultAdapter(context.resultSink())
         );
     }
@@ -90,8 +92,9 @@ public final class CollectBlockMaidTask implements MaidTask {
 
     @Override
     public MaidTaskSnapshot snapshot() {
-        return MaidTaskSnapshot.builder(1)
+        return MaidTaskSnapshot.builder(2)
                 .putInt(INITIAL_TARGET_COUNT, executor.initialTargetCount())
+                .putLong(REMAINING_TIMEOUT_TICKS, executor.remainingTimeoutTicks())
                 .putInt(
                         TOOL_LEASE_SOURCE_SLOT,
                         toolLease == null ? EquipmentLease.NO_SOURCE_SLOT : toolLease.sourceSlot()
@@ -119,5 +122,9 @@ public final class CollectBlockMaidTask implements MaidTask {
 
     private static boolean isAxe(net.minecraft.world.item.ItemStack stack) {
         return !stack.isEmpty() && stack.typeHolder().is(ItemTags.AXES);
+    }
+
+    private static long fullTimeoutTicks(io.github.ozozorz.aipartner.contract.TaskContract contract) {
+        return contract.failurePolicy().timeoutSeconds() * 20L;
     }
 }

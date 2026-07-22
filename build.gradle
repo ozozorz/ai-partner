@@ -27,6 +27,10 @@ dependencies {
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
 	testImplementation "org.junit.jupiter:junit-jupiter:5.11.4"
+	testImplementation("com.networknt:json-schema-validator:2.0.4") {
+		exclude group: "com.fasterxml.jackson.dataformat", module: "jackson-dataformat-yaml"
+		exclude group: "com.ethlo.time", module: "itu"
+	}
 	testRuntimeOnly "org.junit.platform:junit-platform-launcher:1.11.4"
 }
 

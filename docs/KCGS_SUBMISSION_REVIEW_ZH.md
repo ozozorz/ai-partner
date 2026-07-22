@@ -1,5 +1,9 @@
 # AI Partner 面向《韩国游戏学会论文学报》的投稿审计
 
+> **历史文件：** 本文审计对象为 v0.4。当前 v0.10 审计与 v0.11 路线请见
+> [`KCGS_V0_10_SUBMISSION_AUDIT_ZH.md`](KCGS_V0_10_SUBMISSION_AUDIT_ZH.md) 和
+> [`V0_11_RESEARCH_FREEZE_PLAN_ZH.md`](V0_11_RESEARCH_FREEZE_PLAN_ZH.md)。
+
 > 审计日期：2026-07-21  
 > 目标期刊：한국게임학회 논문지（Journal of Korea Game Society）  
 > 审计对象：AI Partner v0.4、冻结实验资产、分析脚本与中文实证初稿  
@@ -276,4 +280,3 @@ v0.4 本地冻结时间早于主实验，但代码提交发生在结果之后，
 
 如果论文要声称改善玩家体验，则必须另开阶段：伦理审批/豁免、招募与功效分析、知情同意、量表、行为
 指标、访谈编码和数据保护。不能用开发者试玩或界面截图替代玩家实证。
-

@@ -10,6 +10,7 @@ import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
 import io.github.ozozorz.aipartner.job.JobType;
 import io.github.ozozorz.aipartner.life.ActivityLocationType;
 import io.github.ozozorz.aipartner.work.MaidWorkMode;
+import java.util.Arrays;
 import java.util.Set;
 
 /** Decodes the strict v2 LLM protocol into the same typed intents used by local control. */
@@ -44,7 +45,7 @@ public final class MaidControlJsonCodec {
                     "invalid_dialogue_act"
             );
             String responseText = nullableString(root, "response_text");
-            if (responseText != null && responseText.length() > MAX_RESPONSE_LENGTH) {
+            if (responseText != null && exceedsCodePointLimit(responseText, MAX_RESPONSE_LENGTH)) {
                 throw invalid("response_too_long");
             }
 
@@ -105,7 +106,9 @@ public final class MaidControlJsonCodec {
             case "RUN_TASK" -> decodeRunTask(object);
             case "SET_WORK_MODE" -> {
                 requireExactFields(object, Set.of("kind", "mode"));
-                MaidWorkMode mode = MaidWorkMode.parse(requiredString(object, "mode"))
+                MaidWorkMode mode = Arrays.stream(MaidWorkMode.values())
+                        .filter(candidate -> candidate.serializedName().equals(requiredString(object, "mode")))
+                        .findFirst()
                         .orElseThrow(() -> invalid("invalid_work_mode"));
                 yield new MaidControlIntent.SetWorkMode(mode);
             }
@@ -119,7 +122,9 @@ public final class MaidControlJsonCodec {
             }
             case "SET_COMBAT_POLICY" -> {
                 requireExactFields(object, Set.of("kind", "policy"));
-                CombatPolicy policy = CombatPolicy.parse(requiredString(object, "policy"))
+                CombatPolicy policy = Arrays.stream(CombatPolicy.values())
+                        .filter(candidate -> candidate.serializedName().equals(requiredString(object, "policy")))
+                        .findFirst()
                         .orElseThrow(() -> invalid("invalid_combat_policy"));
                 yield new MaidControlIntent.SetCombatPolicy(policy);
             }
@@ -153,7 +158,8 @@ public final class MaidControlJsonCodec {
             case "RENAME" -> {
                 requireExactFields(object, Set.of("kind", "name"));
                 String name = requiredString(object, "name").strip();
-                if (name.isEmpty() || name.length() > 32 || name.chars().anyMatch(Character::isISOControl)) {
+                if (name.isEmpty() || exceedsCodePointLimit(name, 32)
+                        || name.chars().anyMatch(Character::isISOControl)) {
                     throw invalid("invalid_name");
                 }
                 yield new MaidControlIntent.Rename(name);
@@ -177,7 +183,7 @@ public final class MaidControlJsonCodec {
             }
             return JobSpecIntent.of(JobSpec.basic(type));
         }
-        if (target.isBlank() || target.length() > 100
+        if (target.isBlank() || exceedsCodePointLimit(target, 100)
                 || quantity < 1 || quantity > 64
                 || radius < 1 || radius > 24) {
             throw invalid("job_parameter_out_of_range");
@@ -243,6 +249,13 @@ public final class MaidControlJsonCodec {
         } catch (IllegalArgumentException exception) {
             throw invalid(error);
         }
+    }
+
+    /**
+     * JSON Schema 的 maxLength 按 Unicode 码点计数；本地 codec 使用相同口径避免代理对造成分歧。
+     */
+    private static boolean exceedsCodePointLimit(String value, int maximum) {
+        return value.codePointCount(0, value.length()) > maximum;
     }
 
     private static IllegalArgumentException invalid(String code) {

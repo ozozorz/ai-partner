@@ -28,7 +28,7 @@ public final class CollectBlockContractValidator implements TaskContractValidato
         if (!partner.hasAxe()) {
             return ContractDecision.rejected(FailureCode.MISSING_TOOL, "message.ai-partner.missing_axe");
         }
-        if (!partner.canStore(item)) {
+        if (!partner.canStore(item, candidate.quantity())) {
             return ContractDecision.rejected(FailureCode.INVENTORY_FULL, "message.ai-partner.inventory_full");
         }
         if (!(partner.level() instanceof ServerLevel serverLevel)
@@ -45,7 +45,7 @@ public final class CollectBlockContractValidator implements TaskContractValidato
                         "target_is_allowed",
                         "target_exists_in_radius",
                         "axe_is_available",
-                        "inventory_has_space"
+                        "inventory_has_capacity(" + candidate.quantity() + ")"
                 ),
                 List.of("maid_inventory_delta(" + candidate.target() + ") >= " + candidate.quantity()),
                 List.of(

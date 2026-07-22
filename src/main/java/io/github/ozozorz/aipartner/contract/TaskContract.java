@@ -8,6 +8,8 @@ import java.util.UUID;
  * 由服务器编译并拥有最终解释权的 IBC 契约。
  */
 public final class TaskContract {
+    public static final int MAX_PREDICATES_PER_SECTION = 64;
+    private static final int MAX_PREDICATE_LENGTH = 512;
     private final UUID contractId;
     private final JobSpec job;
     private final List<String> preconditions;
@@ -31,9 +33,9 @@ public final class TaskContract {
     ) {
         this.contractId = Objects.requireNonNull(contractId, "contractId");
         this.job = Objects.requireNonNull(job, "job");
-        this.preconditions = List.copyOf(preconditions);
-        this.goalPredicates = List.copyOf(goalPredicates);
-        this.invariants = List.copyOf(invariants);
+        this.preconditions = immutablePredicates(preconditions, "preconditions");
+        this.goalPredicates = immutablePredicates(goalPredicates, "goalPredicates");
+        this.invariants = immutablePredicates(invariants, "invariants");
         this.failurePolicy = Objects.requireNonNull(failurePolicy, "failurePolicy");
         this.acceptedAtEpochMillis = acceptedAtEpochMillis;
         this.status = Objects.requireNonNull(status, "status");
@@ -105,6 +107,46 @@ public final class TaskContract {
                 status,
                 failureCode
         );
+    }
+
+    /**
+     * 从当前存档格式恢复完整契约描述，保证重启前后的审计谓词保持一致。
+     */
+    public static TaskContract restored(
+            UUID contractId,
+            JobSpec job,
+            List<String> preconditions,
+            List<String> goalPredicates,
+            List<String> invariants,
+            long acceptedAtEpochMillis,
+            ContractStatus status,
+            FailureCode failureCode,
+            FailurePolicy failurePolicy
+    ) {
+        return new TaskContract(
+                contractId,
+                job,
+                preconditions,
+                goalPredicates,
+                invariants,
+                failurePolicy,
+                acceptedAtEpochMillis,
+                status,
+                failureCode
+        );
+    }
+
+    private static List<String> immutablePredicates(List<String> predicates, String fieldName) {
+        Objects.requireNonNull(predicates, fieldName);
+        if (predicates.size() > MAX_PREDICATES_PER_SECTION) {
+            throw new IllegalArgumentException(fieldName + " exceeds persistence limit");
+        }
+        for (String predicate : predicates) {
+            if (predicate == null || predicate.isBlank() || predicate.length() > MAX_PREDICATE_LENGTH) {
+                throw new IllegalArgumentException(fieldName + " contains an invalid predicate");
+            }
+        }
+        return List.copyOf(predicates);
     }
 
     /**

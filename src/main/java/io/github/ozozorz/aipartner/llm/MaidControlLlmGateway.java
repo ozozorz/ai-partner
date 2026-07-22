@@ -7,6 +7,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import io.github.ozozorz.aipartner.config.AiPartnerConfig;
+import io.github.ozozorz.aipartner.config.LlmEndpointPolicy;
 import io.github.ozozorz.aipartner.control.MaidControlInterpretation;
 import io.github.ozozorz.aipartner.control.MaidControlJsonCodec;
 import io.github.ozozorz.aipartner.control.MaidDriverSettings;
@@ -232,11 +233,7 @@ public final class MaidControlLlmGateway {
     }
 
     private boolean isLocalEndpoint() {
-        String host = URI.create(config.endpoint()).getHost();
-        return host == null
-                || "localhost".equalsIgnoreCase(host)
-                || "127.0.0.1".equals(host)
-                || "::1".equals(host);
+        return LlmEndpointPolicy.isLocal(config.endpoint());
     }
 
     private boolean isDeepSeekEndpoint() {

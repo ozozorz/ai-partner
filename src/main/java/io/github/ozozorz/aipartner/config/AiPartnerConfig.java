@@ -4,7 +4,6 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import io.github.ozozorz.aipartner.AiPartnerMod;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,7 +24,6 @@ public record AiPartnerConfig(
         boolean requestJsonResponseFormat
 ) {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("ai-partner.json");
     private static final AiPartnerConfig DEFAULT = new AiPartnerConfig(
             true,
             "https://api.deepseek.com/chat/completions",
@@ -33,6 +31,17 @@ public record AiPartnerConfig(
             "DEEPSEEK_API_KEY",
             30,
             1,
+            512,
+            0.0,
+            true
+    );
+    private static final AiPartnerConfig DISABLED_AFTER_LOAD_FAILURE = new AiPartnerConfig(
+            false,
+            "http://127.0.0.1:1/disabled",
+            "disabled",
+            "",
+            30,
+            0,
             512,
             0.0,
             true
@@ -57,22 +66,30 @@ public record AiPartnerConfig(
 
     private static AiPartnerConfig load() {
         try {
-            if (!Files.exists(CONFIG_PATH)) {
-                writeConfig(DEFAULT);
+            Path configPath = configPath();
+            if (!Files.exists(configPath)) {
+                writeConfig(DEFAULT, configPath);
                 return DEFAULT;
             }
-            AiPartnerConfig loaded = GSON.fromJson(Files.readString(CONFIG_PATH, StandardCharsets.UTF_8), AiPartnerConfig.class);
+            AiPartnerConfig loaded = GSON.fromJson(Files.readString(configPath, StandardCharsets.UTF_8), AiPartnerConfig.class);
             AiPartnerConfig validated = validate(loaded);
             if (isLegacyPlaceholder(validated) && hasEnvironmentVariable(DEFAULT.apiKeyEnvironmentVariable())) {
                 AiPartnerMod.LOGGER.info("Migrating unconfigured AI Partner LLM settings to DeepSeek");
-                writeConfig(DEFAULT);
+                writeConfig(DEFAULT, configPath);
                 return DEFAULT;
             }
             return validated;
         } catch (IOException | RuntimeException exception) {
             AiPartnerMod.LOGGER.error("Failed to load config/ai-partner.json; LLM integration is disabled", exception);
-            return DEFAULT;
+            return disabledAfterLoadFailure();
         }
+    }
+
+    /**
+     * 配置读取或校验失败时返回关闭状态，避免错误配置意外启用远程网关。
+     */
+    static AiPartnerConfig disabledAfterLoadFailure() {
+        return DISABLED_AFTER_LOAD_FAILURE;
     }
 
     private static AiPartnerConfig validate(AiPartnerConfig config) {
@@ -82,10 +99,7 @@ public record AiPartnerConfig(
                 || config.apiKeyEnvironmentVariable() == null) {
             throw new IllegalArgumentException("Missing required AI Partner configuration fields");
         }
-        URI endpointUri = URI.create(config.endpoint());
-        if (!("http".equalsIgnoreCase(endpointUri.getScheme()) || "https".equalsIgnoreCase(endpointUri.getScheme()))) {
-            throw new IllegalArgumentException("LLM endpoint must use HTTP or HTTPS");
-        }
+        LlmEndpointPolicy.validate(config.endpoint());
         if (config.timeoutSeconds() < 1 || config.timeoutSeconds() > 120) {
             throw new IllegalArgumentException("timeoutSeconds must be between 1 and 120");
         }
@@ -108,12 +122,7 @@ public record AiPartnerConfig(
         if (!llmEnabled || model.isBlank() || "configure-me".equals(model)) {
             return false;
         }
-        URI endpointUri = URI.create(endpoint);
-        String host = endpointUri.getHost();
-        boolean localEndpoint = host == null
-                || "localhost".equalsIgnoreCase(host)
-                || "127.0.0.1".equals(host)
-                || "::1".equals(host);
+        boolean localEndpoint = LlmEndpointPolicy.isLocal(endpoint);
         return localEndpoint
                 || apiKeyEnvironmentVariable.isBlank()
                 || hasEnvironmentVariable(apiKeyEnvironmentVariable);
@@ -134,8 +143,15 @@ public record AiPartnerConfig(
                 && "AI_PARTNER_API_KEY".equals(config.apiKeyEnvironmentVariable());
     }
 
-    private static void writeConfig(AiPartnerConfig config) throws IOException {
-        Files.createDirectories(CONFIG_PATH.getParent());
-        Files.writeString(CONFIG_PATH, GSON.toJson(config) + System.lineSeparator(), StandardCharsets.UTF_8);
+    /**
+     * 延迟解析 Fabric 配置目录，使纯单元测试可验证不依赖游戏运行时的配置策略。
+     */
+    private static Path configPath() {
+        return FabricLoader.getInstance().getConfigDir().resolve("ai-partner.json");
+    }
+
+    private static void writeConfig(AiPartnerConfig config, Path configPath) throws IOException {
+        Files.createDirectories(configPath.getParent());
+        Files.writeString(configPath, GSON.toJson(config) + System.lineSeparator(), StandardCharsets.UTF_8);
     }
 }

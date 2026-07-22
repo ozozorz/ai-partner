@@ -10,6 +10,8 @@ import io.github.ozozorz.aipartner.core.event.ContractLifecycleEvent;
 import io.github.ozozorz.aipartner.core.event.MaidDomainEvents;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.job.JobType;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -26,7 +28,8 @@ import org.slf4j.LoggerFactory;
  * 服务端唯一活动契约的运行时，统一处理指令、任务、暂停、恢复、终态和持久化。
  */
 public final class MaidTaskRuntime {
-    public static final int CURRENT_DATA_VERSION = 5;
+    public static final int CURRENT_DATA_VERSION = 6;
+    private static final int CONTRACT_PREDICATE_FORMAT_VERSION = 1;
     private static final Logger LOGGER = LoggerFactory.getLogger(MaidTaskRuntime.class);
 
     private final AiPartnerEntity partner;
@@ -38,7 +41,7 @@ public final class MaidTaskRuntime {
     private @Nullable MaidTaskContext activeContext;
     private @Nullable MaidTaskSnapshot pendingRestoreSnapshot;
     private TaskExecutionPolicy executionPolicy = TaskExecutionPolicy.DEFAULT;
-    private int runtimeRecoveryCount;
+    private final RecoveryBudget recoveryBudget = new RecoveryBudget();
 
     public MaidTaskRuntime(
             AiPartnerEntity partner,
@@ -74,6 +77,7 @@ public final class MaidTaskRuntime {
         cancelExisting(actor, "replaced_by_new_contract");
         currentContract = contract;
         executionPolicy = policy;
+        recoveryBudget.reset();
         publish("contract_accepted", actor, rawInstruction);
         contract.markRunning();
 
@@ -102,6 +106,7 @@ public final class MaidTaskRuntime {
         cancelExisting(actor, rawInstruction);
         currentContract = cancelContract;
         executionPolicy = policy;
+        recoveryBudget.reset();
         publish("contract_accepted", actor, rawInstruction);
         cancelContract.markRunning();
         behaviorController.clearActivity();
@@ -128,6 +133,7 @@ public final class MaidTaskRuntime {
         cancelExisting(actor, reason);
         currentContract = null;
         stopActiveTask();
+        recoveryBudget.reset();
         behaviorController.activateDirective(directive);
         partner.onManualDirectiveActivated(directive);
     }
@@ -260,7 +266,7 @@ public final class MaidTaskRuntime {
         currentContract = null;
         stopActiveTask();
         executionPolicy = TaskExecutionPolicy.standard("EXPERIMENT_RESET");
-        runtimeRecoveryCount = 0;
+        recoveryBudget.reset();
         behaviorController.clearActivity();
         partner.getNavigation().stop();
     }
@@ -309,13 +315,17 @@ public final class MaidTaskRuntime {
     /**
      * 记录一次由动态世界故障触发的局部恢复。
      */
-    public void recordRuntimeRecovery(String reason) {
-        runtimeRecoveryCount++;
+    public boolean tryRecordRuntimeRecovery(String reason) {
+        if (!recoveryBudget.tryConsume(maximumLocalRetries(), executionPolicy.localRecoveryEnabled())) {
+            publish("runtime_recovery_exhausted", null, reason);
+            return false;
+        }
         publish("runtime_recovery", null, reason);
+        return true;
     }
 
     public int runtimeRecoveryCount() {
-        return runtimeRecoveryCount;
+        return recoveryBudget.consumed();
     }
 
     /**
@@ -339,7 +349,7 @@ public final class MaidTaskRuntime {
         output.putString("CurrentSystemVariant", executionPolicy.sourceId());
         output.putInt("RuntimeMonitoringEnabled", executionPolicy.runtimeMonitoringEnabled() ? 1 : 0);
         output.putInt("LocalRecoveryEnabled", executionPolicy.localRecoveryEnabled() ? 1 : 0);
-        output.putInt("RuntimeRecoveryCount", runtimeRecoveryCount);
+        output.putInt("RuntimeRecoveryCount", recoveryBudget.consumed());
 
         output.putInt("CollectInitialTargetCount", 0);
         output.putInt("DepositMovedCount", 0);
@@ -366,7 +376,7 @@ public final class MaidTaskRuntime {
         stopActiveTask();
         currentContract = null;
         behaviorController.load(input);
-        runtimeRecoveryCount = input.getIntOr("RuntimeRecoveryCount", 0);
+        recoveryBudget.restore(input.getIntOr("RuntimeRecoveryCount", 0));
 
         String sourceId = input.getStringOr(
                 "CurrentOrderSource",
@@ -445,7 +455,8 @@ public final class MaidTaskRuntime {
         return taskRegistry.create(jobType, partner);
     }
 
-    private static void saveContract(ValueOutput output, TaskContract contract) {
+    /** 写入当前完整契约格式；包内可见以支持字段级持久化测试。 */
+    static void saveContract(ValueOutput output, TaskContract contract) {
         output.putString("ContractId", contract.contractId().toString());
         output.putString("ContractJobType", contract.job().type().name());
         output.putString("ContractTarget", contract.job().target());
@@ -457,9 +468,14 @@ public final class MaidTaskRuntime {
         output.putInt("ContractMaxLocalRetries", contract.failurePolicy().maxLocalRetries());
         output.putInt("ContractMaxLlmReplans", contract.failurePolicy().maxLlmReplans());
         output.putInt("ContractTimeoutSeconds", contract.failurePolicy().timeoutSeconds());
+        output.putInt("ContractPredicateFormatVersion", CONTRACT_PREDICATE_FORMAT_VERSION);
+        writePredicateList(output, "ContractPrecondition", contract.preconditions());
+        writePredicateList(output, "ContractGoalPredicate", contract.goalPredicates());
+        writePredicateList(output, "ContractInvariant", contract.invariants());
     }
 
-    private static TaskContract restoreContract(ValueInput input, String savedContractId) {
+    /** 恢复当前或旧版契约格式；未知的新谓词格式会失败关闭。 */
+    static TaskContract restoreContract(ValueInput input, String savedContractId) {
         JobSpec job = new JobSpec(
                 JobType.valueOf(input.getStringOr("ContractJobType", JobType.CANCEL.name())),
                 input.getStringOr("ContractTarget", ""),
@@ -472,14 +488,56 @@ public final class MaidTaskRuntime {
                 input.getIntOr("ContractMaxLlmReplans", defaultPolicy.maxLlmReplans()),
                 input.getIntOr("ContractTimeoutSeconds", defaultPolicy.timeoutSeconds())
         );
+        int predicateFormat = input.getIntOr("ContractPredicateFormatVersion", 0);
+        if (predicateFormat == 0) {
+            return TaskContract.restored(
+                    UUID.fromString(savedContractId),
+                    job,
+                    input.getLongOr("ContractAcceptedAt", System.currentTimeMillis()),
+                    ContractStatus.valueOf(input.getStringOr("ContractStatus", ContractStatus.FAILED.name())),
+                    FailureCode.valueOf(input.getStringOr("ContractFailureCode", FailureCode.INTERNAL_ERROR.name())),
+                    policy
+            );
+        }
+        if (predicateFormat != CONTRACT_PREDICATE_FORMAT_VERSION) {
+            throw new IllegalArgumentException("Unsupported contract predicate format " + predicateFormat);
+        }
         return TaskContract.restored(
                 UUID.fromString(savedContractId),
                 job,
+                readPredicateList(input, "ContractPrecondition"),
+                readPredicateList(input, "ContractGoalPredicate"),
+                readPredicateList(input, "ContractInvariant"),
                 input.getLongOr("ContractAcceptedAt", System.currentTimeMillis()),
                 ContractStatus.valueOf(input.getStringOr("ContractStatus", ContractStatus.FAILED.name())),
                 FailureCode.valueOf(input.getStringOr("ContractFailureCode", FailureCode.INTERNAL_ERROR.name())),
                 policy
         );
+    }
+
+    /** 将完整契约谓词写为有界、稳定的索引字段。 */
+    private static void writePredicateList(ValueOutput output, String prefix, List<String> predicates) {
+        output.putInt(prefix + "Count", predicates.size());
+        for (int index = 0; index < predicates.size(); index++) {
+            output.putString(prefix + index, predicates.get(index));
+        }
+    }
+
+    /** 从当前格式读取谓词；损坏或超界的计数会使契约恢复失败关闭。 */
+    private static List<String> readPredicateList(ValueInput input, String prefix) {
+        int count = input.getIntOr(prefix + "Count", -1);
+        if (count < 0 || count > TaskContract.MAX_PREDICATES_PER_SECTION) {
+            throw new IllegalArgumentException("Invalid persisted predicate count for " + prefix);
+        }
+        List<String> predicates = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            String predicate = input.getStringOr(prefix + index, "");
+            if (predicate.isBlank()) {
+                throw new IllegalArgumentException("Invalid persisted predicate for " + prefix);
+            }
+            predicates.add(predicate);
+        }
+        return List.copyOf(predicates);
     }
 
     private MaidTaskResultSink resultSink(UUID expectedContractId) {

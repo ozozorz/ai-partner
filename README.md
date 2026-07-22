@@ -160,15 +160,16 @@ v0.4 的批处理会自动重置、运行和独立判定场景，并在 `logs/ai
 .\gradlew.bat test
 ```
 
-当前 97 项单元测试覆盖规则/组合指令解析、严格 v1/v2 JSON 边界、离线工作/日程/战斗意图、驱动设置与 `@` 前缀匹配、带命名空间资源参数的正式命令、任务/工作注册表、制作网格边界、GUI 槽位分区、具体工作按钮白名单、自然树策略、矿石安全条件、熔炉批次守恒与租约、钓鱼岸线几何、成长曲线、契约生命周期、日程边界、主人索引、皮肤校验、旧背包迁移，以及旧实验清单与数据集。详细模块设计和状态图见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，v0.10 驱动设计与实机验收见 [`docs/V0_10_LLM_DRIVER_ZH.md`](docs/V0_10_LLM_DRIVER_ZH.md)。
+当前 144 项单元测试覆盖规则/组合指令解析、v2 Schema↔codec 差分语料、离线工作/日程/战斗意图、驱动设置与 `@` 前缀匹配、带命名空间资源参数的正式命令、任务/工作注册表、制作网格边界、GUI 槽位分区、具体工作按钮白名单、自然树策略、矿石安全条件、熔炉批次守恒与租约、钓鱼岸线几何、成长曲线、契约生命周期与完整存档往返、容量/恢复/超时预算、日程边界、主人索引、皮肤校验、旧背包迁移、LLM 端点传输策略，以及旧实验清单与数据集。详细模块设计和状态图见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，v0.10 驱动设计与实机验收见 [`docs/V0_10_LLM_DRIVER_ZH.md`](docs/V0_10_LLM_DRIVER_ZH.md)。
 
 ## 研究结果与复现
 
 - v0.4 分析流程与统计解释见 [`analysis/README.md`](analysis/README.md)；
 - 自动生成的主实验与 A2 审计见 [`analysis/generated/analysis_report.md`](analysis/generated/analysis_report.md)；
 - 包含真实结果与讨论的论文实证初稿见 [`docs/THESIS_EMPIRICAL_DRAFT_ZH.md`](docs/THESIS_EMPIRICAL_DRAFT_ZH.md)；
-- 面向《韩国游戏学会论文学报》的投稿差距、代码审计与阶段验收门见 [`docs/KCGS_SUBMISSION_REVIEW_ZH.md`](docs/KCGS_SUBMISSION_REVIEW_ZH.md)；
-- 不覆盖 v0.4 的下一轮前瞻性实验设计见 [`docs/V0_5_PREREGISTRATION_DRAFT_ZH.md`](docs/V0_5_PREREGISTRATION_DRAFT_ZH.md)；
+- 面向《韩国游戏学会论文学报》的当前投稿差距与证据审计见 [`docs/KCGS_V0_10_SUBMISSION_AUDIT_ZH.md`](docs/KCGS_V0_10_SUBMISSION_AUDIT_ZH.md)；
+- v0.11 分阶段研究冻结与投稿验收门见 [`docs/V0_11_RESEARCH_FREEZE_PLAN_ZH.md`](docs/V0_11_RESEARCH_FREEZE_PLAN_ZH.md)；
+- v0.4 时期的历史审计和未注册设计草案见 [`docs/KCGS_SUBMISSION_REVIEW_ZH.md`](docs/KCGS_SUBMISSION_REVIEW_ZH.md) 与 [`docs/V0_5_PREREGISTRATION_DRAFT_ZH.md`](docs/V0_5_PREREGISTRATION_DRAFT_ZH.md)；
 - 原主实验快照见 [`artifacts/experiments/v0.4-primary/`](artifacts/experiments/v0.4-primary/)，含 A2 的增量快照见 [`artifacts/experiments/v0.4-with-a2/`](artifacts/experiments/v0.4-with-a2/)。
 
 ## 下一里程碑

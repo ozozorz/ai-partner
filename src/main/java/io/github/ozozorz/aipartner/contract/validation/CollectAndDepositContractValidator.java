@@ -30,7 +30,7 @@ public final class CollectAndDepositContractValidator implements TaskContractVal
         if (!partner.hasAxe()) {
             return ContractDecision.rejected(FailureCode.MISSING_TOOL, "message.ai-partner.missing_axe");
         }
-        if (!partner.canStore(item)) {
+        if (!partner.canStore(item, candidate.quantity())) {
             return ContractDecision.rejected(FailureCode.INVENTORY_FULL, "message.ai-partner.inventory_full");
         }
         ServerLevel level = player.level();
@@ -60,7 +60,7 @@ public final class CollectAndDepositContractValidator implements TaskContractVal
                         "target_is_allowed",
                         "target_exists_in_radius",
                         "axe_is_available",
-                        "inventory_has_space",
+                        "inventory_has_capacity(" + candidate.quantity() + ")",
                         "accessible_chest_has_capacity"
                 ),
                 List.of(
