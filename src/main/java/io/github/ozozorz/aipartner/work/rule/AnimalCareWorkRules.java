@@ -7,6 +7,7 @@ import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import io.github.ozozorz.aipartner.work.MaidWorkRule;
 import io.github.ozozorz.aipartner.work.WorkActionResult;
 import io.github.ozozorz.aipartner.work.WorkTarget;
+import io.github.ozozorz.aipartner.work.supply.WorkSupplyRequirement;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
@@ -34,6 +35,25 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class AnimalCareWorkRules {
     private static final int MAX_NEARBY_BREEDING_ANIMALS = 16;
+    private static final WorkSupplyRequirement BEE_SUPPLY = new WorkSupplyRequirement(
+            "beekeeper_container",
+            partner -> hasShears(partner)
+                    || partner.getInventory().getItems().stream().anyMatch(stack -> stack.is(Items.GLASS_BOTTLE)),
+            List.of(Items.SHEARS, Items.GLASS_BOTTLE),
+            false
+    );
+    private static final WorkSupplyRequirement SHEARS_SUPPLY = new WorkSupplyRequirement(
+            "shearer_shears",
+            AnimalCareWorkRules::hasShears,
+            List.of(Items.SHEARS),
+            false
+    );
+    private static final WorkSupplyRequirement BUCKET_SUPPLY = new WorkSupplyRequirement(
+            "milker_bucket",
+            partner -> partner.getInventory().getItems().stream().anyMatch(stack -> stack.is(Items.BUCKET)),
+            List.of(Items.BUCKET),
+            false
+    );
     private static final Set<Item> UNSAFE_OWNER_FOODS = Set.of(
             Items.ROTTEN_FLESH,
             Items.SPIDER_EYE,
@@ -66,8 +86,15 @@ public final class AnimalCareWorkRules {
             return state.getBlock() instanceof BeehiveBlock
                     && state.getValue(BeehiveBlock.HONEY_LEVEL) >= BeehiveBlock.MAX_HONEY_LEVELS
                     && CampfireBlock.isSmokeyPos(context.level(), position)
-                    && (hasShears(context) || context.actions().inventory().contains(Items.GLASS_BOTTLE))
                     && context.actions().inventory().hasAnySpace();
+        }
+
+        @Override
+        public Optional<WorkSupplyRequirement> supplyRequirement(
+                MaidWorkContext context,
+                WorkTarget target
+        ) {
+            return Optional.of(BEE_SUPPLY);
         }
 
         @Override
@@ -100,7 +127,7 @@ public final class AnimalCareWorkRules {
 
         @Override
         public Optional<WorkTarget> findEntityTarget(MaidWorkContext context) {
-            if (!hasShears(context) || !context.actions().inventory().hasAnySpace()) {
+            if (!context.actions().inventory().hasAnySpace()) {
                 return Optional.empty();
             }
             return nearestLiving(context, entity -> entity instanceof Shearable shearable
@@ -114,8 +141,15 @@ public final class AnimalCareWorkRules {
                     .map(LivingEntity.class::cast)
                     .filter(LivingEntity::isAlive)
                     .filter(entity -> entity instanceof Shearable shearable && shearable.readyForShearing())
-                    .isPresent()
-                    && hasShears(context);
+                    .isPresent();
+        }
+
+        @Override
+        public Optional<WorkSupplyRequirement> supplyRequirement(
+                MaidWorkContext context,
+                WorkTarget target
+        ) {
+            return Optional.of(SHEARS_SUPPLY);
         }
 
         @Override
@@ -150,8 +184,7 @@ public final class AnimalCareWorkRules {
 
         @Override
         public Optional<WorkTarget> findEntityTarget(MaidWorkContext context) {
-            if (!context.actions().inventory().contains(Items.BUCKET)
-                    || !context.actions().inventory().canAdd(new ItemStack(Items.MILK_BUCKET))) {
+            if (!context.actions().inventory().canAdd(new ItemStack(Items.MILK_BUCKET))) {
                 return Optional.empty();
             }
             return nearestLiving(context, entity -> entity instanceof AbstractCow cow && !cow.isBaby());
@@ -164,8 +197,15 @@ public final class AnimalCareWorkRules {
                     .map(AbstractCow.class::cast)
                     .filter(LivingEntity::isAlive)
                     .filter(cow -> !cow.isBaby())
-                    .isPresent()
-                    && context.actions().inventory().contains(Items.BUCKET);
+                    .isPresent();
+        }
+
+        @Override
+        public Optional<WorkSupplyRequirement> supplyRequirement(
+                MaidWorkContext context,
+                WorkTarget target
+        ) {
+            return Optional.of(BUCKET_SUPPLY);
         }
 
         @Override
@@ -293,8 +333,12 @@ public final class AnimalCareWorkRules {
     }
 
     private static boolean hasShears(MaidWorkContext context) {
-        return context.partner().getMainHandItem().is(Items.SHEARS)
-                || context.actions().inventory().contains(stack -> stack.is(Items.SHEARS));
+        return hasShears(context.partner());
+    }
+
+    private static boolean hasShears(io.github.ozozorz.aipartner.entity.AiPartnerEntity partner) {
+        return partner.getMainHandItem().is(Items.SHEARS)
+                || partner.getInventory().getItems().stream().anyMatch(stack -> stack.is(Items.SHEARS));
     }
 
     private static ServerPlayer owner(MaidWorkContext context) {

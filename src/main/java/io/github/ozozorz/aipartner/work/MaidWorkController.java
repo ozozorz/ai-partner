@@ -4,6 +4,8 @@ import io.github.ozozorz.aipartner.core.action.MaidActions;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.life.ActivityLocation;
 import io.github.ozozorz.aipartner.life.MaidLifeController;
+import io.github.ozozorz.aipartner.work.supply.MaidWorkSupplyController;
+import io.github.ozozorz.aipartner.work.supply.WorkSupplyRequirement;
 import java.util.Iterator;
 import java.util.Objects;
 import net.minecraft.core.BlockPos;
@@ -33,6 +35,7 @@ public final class MaidWorkController {
     private final MaidLifeController lifeController;
     private final MaidActions actions;
     private final MaidWorkRegistry registry;
+    private final MaidWorkSupplyController supplyController;
 
     private MaidWorkMode mode = MaidWorkMode.NONE;
     private State state = State.IDLE;
@@ -49,6 +52,7 @@ public final class MaidWorkController {
         this.lifeController = Objects.requireNonNull(lifeController, "lifeController");
         this.actions = MaidActions.create(partner);
         this.registry = MaidWorkRegistry.createDefault();
+        this.supplyController = new MaidWorkSupplyController(partner, actions);
     }
 
     public MaidWorkMode mode() {
@@ -64,6 +68,7 @@ public final class MaidWorkController {
             registry.ruleFor(this.mode).ifPresent(rule -> rule.onDeselected(level, partner));
         }
         this.mode = next;
+        supplyController.reset();
         actions.navigation().stop();
         resetState();
     }
@@ -73,10 +78,13 @@ public final class MaidWorkController {
     }
 
     public boolean isActivelyWorking() {
-        return mode != MaidWorkMode.NONE && state != State.IDLE;
+        return mode != MaidWorkMode.NONE && (state != State.IDLE || supplyController.isPreparing());
     }
 
     public String executionState() {
+        if (supplyController.isPreparing()) {
+            return mode.name() + "_PREPARING_" + supplyController.executionState();
+        }
         MaidWorkRule selected = registry.ruleFor(mode).orElse(null);
         return selected != null && selected.managesOwnExecution()
                 ? mode.name() + '_' + selected.managedExecutionState()
@@ -95,11 +103,13 @@ public final class MaidWorkController {
                 || !lifeController.canPerformScheduledWork()
                 || !boundary.contains(level, partner.blockPosition())) {
             suspendManagedRule(level, boundary);
+            supplyController.reset();
             resetState();
             return;
         }
         if (rule.requiresMobGriefing() && !level.getGameRules().get(GameRules.MOB_GRIEFING)) {
             suspendManagedRule(level, boundary);
+            supplyController.reset();
             enterCooldown(BLOCKED_COOLDOWN_TICKS);
             return;
         }
@@ -111,6 +121,10 @@ public final class MaidWorkController {
             state = rule.managesOwnExecution() ? State.IDLE : State.SEARCHING;
         }
         if (rule.managesOwnExecution()) {
+            if (prepareSupply(context, rule, null)) {
+                rule.onSuspended(context);
+                return;
+            }
             rule.tickManaged(context);
             return;
         }
@@ -137,6 +151,7 @@ public final class MaidWorkController {
     public void load(ValueInput input) {
         mode = MaidWorkMode.fromSavedName(input.getStringOr("SelectedWorkMode", MaidWorkMode.NONE.serializedName()));
         registry.ruleFor(mode).ifPresent(rule -> rule.load(input));
+        supplyController.reset();
         resetState();
     }
 
@@ -148,6 +163,7 @@ public final class MaidWorkController {
         if (partner.level() instanceof ServerLevel level) {
             registry.ruleFor(mode).ifPresent(rule -> rule.onDeselected(level, partner));
         }
+        supplyController.reset();
         actions.navigation().stop();
         resetState();
     }
@@ -228,7 +244,11 @@ public final class MaidWorkController {
 
     private void navigate(MaidWorkContext context, MaidWorkRule rule) {
         if (target == null || !isTargetLegalAndValid(context, rule)) {
+            supplyController.reset();
             retrySearch();
+            return;
+        }
+        if (prepareSupply(context, rule, target)) {
             return;
         }
         BlockPos position = target.currentPosition(context.level());
@@ -251,7 +271,11 @@ public final class MaidWorkController {
 
     private void act(MaidWorkContext context, MaidWorkRule rule) {
         if (target == null || !isTargetLegalAndValid(context, rule)) {
+            supplyController.reset();
             retrySearch();
+            return;
+        }
+        if (prepareSupply(context, rule, target)) {
             return;
         }
         if (partner.distanceToSqr(target.currentPosition(context.level()).getCenter())
@@ -263,6 +287,7 @@ public final class MaidWorkController {
         switch (result) {
             case SUCCESS -> {
                 partner.rewardWorkCompletion(mode);
+                supplyController.retryWithNewMaterials();
                 beginDropCollection(context, rule);
             }
             case RETRY -> retrySearch();
@@ -316,6 +341,25 @@ public final class MaidWorkController {
     private boolean isTargetLegalAndValid(MaidWorkContext context, MaidWorkRule rule) {
         BlockPos currentPosition = target.currentPosition(context.level());
         return context.isLegal(currentPosition) && rule.isStillValid(context, target);
+    }
+
+    /**
+     * 把具体规则声明的物资需求交给独立准备状态机；允许降级的规则在无法制作时继续执行。
+     */
+    private boolean prepareSupply(
+            MaidWorkContext context,
+            MaidWorkRule rule,
+            @Nullable WorkTarget currentTarget
+    ) {
+        WorkSupplyRequirement requirement = rule.supplyRequirement(context, currentTarget).orElse(null);
+        if (requirement == null) {
+            supplyController.reset();
+            return false;
+        }
+        MaidWorkSupplyController.PreparationStatus status = supplyController.tick(context, requirement);
+        return status == MaidWorkSupplyController.PreparationStatus.PREPARING
+                || (status == MaidWorkSupplyController.PreparationStatus.UNAVAILABLE
+                && !requirement.allowsFallback());
     }
 
     private void tickCooldown() {

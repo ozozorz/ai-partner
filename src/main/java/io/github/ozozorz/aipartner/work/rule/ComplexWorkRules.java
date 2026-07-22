@@ -6,6 +6,7 @@ import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import io.github.ozozorz.aipartner.work.MaidWorkRule;
 import io.github.ozozorz.aipartner.work.WorkActionResult;
 import io.github.ozozorz.aipartner.work.WorkTarget;
+import io.github.ozozorz.aipartner.work.supply.WorkSupplyRequirement;
 import io.github.ozozorz.aipartner.work.complex.MiningSafety;
 import io.github.ozozorz.aipartner.work.complex.FurnaceWorkRule;
 import io.github.ozozorz.aipartner.work.complex.FishingWorkRule;
@@ -20,7 +21,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.ItemTags;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
@@ -40,7 +43,15 @@ public final class ComplexWorkRules {
     private static final class LumberjackRule implements MaidWorkRule {
         private static final String PLAN_COUNT = "ComplexTreePlanCount";
         private static final String PLAN_POSITION_PREFIX = "ComplexTreePlanPosition";
+        private static final WorkSupplyRequirement AXE_SUPPLY = new WorkSupplyRequirement(
+                "lumberjack_axe",
+                partner -> isAxe(partner.getMainHandItem())
+                        || partner.getInventory().getItems().stream().anyMatch(LumberjackRule::isAxe),
+                List.of(Items.WOODEN_AXE, Items.STONE_AXE, Items.IRON_AXE, Items.DIAMOND_AXE),
+                true
+        );
         private final LinkedHashSet<BlockPos> approvedLogs = new LinkedHashSet<>();
+        private boolean lastActionBareHand;
 
         @Override
         public MaidWorkMode mode() {
@@ -81,9 +92,24 @@ public final class ComplexWorkRules {
         }
 
         @Override
+        public Optional<WorkSupplyRequirement> supplyRequirement(
+                MaidWorkContext context,
+                WorkTarget target
+        ) {
+            return Optional.of(AXE_SUPPLY);
+        }
+
+        @Override
         public WorkActionResult perform(MaidWorkContext context, WorkTarget target) {
-            EquipmentLease lease = EquipmentLease.acquire(context.partner(), LumberjackRule::isAxe).orElse(null);
-            if (lease == null || !context.actions().inventory().hasAnySpace()) {
+            if (!context.actions().inventory().hasAnySpace()) {
+                return WorkActionResult.BLOCKED;
+            }
+            EquipmentLease axeLease = EquipmentLease.acquire(context.partner(), LumberjackRule::isAxe).orElse(null);
+            lastActionBareHand = axeLease == null;
+            EquipmentLease lease = axeLease != null
+                    ? axeLease
+                    : EquipmentLease.acquireBareHand(context.partner()).orElse(null);
+            if (lease == null) {
                 return WorkActionResult.BLOCKED;
             }
             try (lease) {
@@ -101,6 +127,11 @@ public final class ComplexWorkRules {
                 approvedLogs.remove(actionLog);
                 return WorkActionResult.SUCCESS;
             }
+        }
+
+        @Override
+        public int successCooldownTicks() {
+            return lastActionBareHand ? 60 : 20;
         }
 
         @Override
@@ -146,8 +177,7 @@ public final class ComplexWorkRules {
         @Override
         public boolean matchesBlock(MaidWorkContext context, BlockPos position, BlockState state) {
             return MiningSafety.isSafeExposedTarget(context, position)
-                    && context.actions().inventory().hasAnySpace()
-                    && hasSuitablePickaxe(context, state);
+                    && context.actions().inventory().hasAnySpace();
         }
 
         @Override
@@ -179,11 +209,34 @@ public final class ComplexWorkRules {
             }
         }
 
-        private static boolean hasSuitablePickaxe(MaidWorkContext context, BlockState state) {
-            if (isSuitablePickaxe(context.partner().getMainHandItem(), state)) {
-                return true;
+        @Override
+        public Optional<WorkSupplyRequirement> supplyRequirement(
+                MaidWorkContext context,
+                WorkTarget target
+        ) {
+            if (target == null || target.isEntity()) {
+                return Optional.empty();
             }
-            return context.actions().inventory().contains(stack -> isSuitablePickaxe(stack, state));
+            BlockState state = context.level().getBlockState(target.fallbackPosition());
+            List<Item> candidates = List.of(
+                            Items.WOODEN_PICKAXE,
+                            Items.STONE_PICKAXE,
+                            Items.IRON_PICKAXE,
+                            Items.DIAMOND_PICKAXE
+                    ).stream()
+                    .filter(item -> isSuitablePickaxe(new ItemStack(item), state))
+                    .toList();
+            if (candidates.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(new WorkSupplyRequirement(
+                    "miner_pickaxe_" + state.getBlock().getDescriptionId(),
+                    partner -> isSuitablePickaxe(partner.getMainHandItem(), state)
+                            || partner.getInventory().getItems().stream()
+                            .anyMatch(stack -> isSuitablePickaxe(stack, state)),
+                    candidates,
+                    false
+            ));
         }
 
         private static boolean isSuitablePickaxe(ItemStack stack, BlockState state) {

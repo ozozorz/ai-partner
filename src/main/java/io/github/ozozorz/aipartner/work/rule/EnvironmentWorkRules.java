@@ -5,6 +5,7 @@ import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import io.github.ozozorz.aipartner.work.MaidWorkRule;
 import io.github.ozozorz.aipartner.work.WorkActionResult;
 import io.github.ozozorz.aipartner.work.WorkTarget;
+import io.github.ozozorz.aipartner.work.supply.WorkSupplyRequirement;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
@@ -34,6 +35,13 @@ public final class EnvironmentWorkRules {
 
     /** 在合法、无碰撞且与已有火把保持间距的低亮度地面放置普通火把。 */
     private static final class TorchRule extends BlockRule {
+        private static final WorkSupplyRequirement TORCH_SUPPLY = new WorkSupplyRequirement(
+                "torch_bearer_torch",
+                partner -> partner.getInventory().getItems().stream().anyMatch(stack -> stack.is(Items.TORCH)),
+                List.of(Items.TORCH),
+                false
+        );
+
         private TorchRule() {
             super(MaidWorkMode.TORCH_BEARER);
         }
@@ -41,10 +49,17 @@ public final class EnvironmentWorkRules {
         @Override
         public boolean matchesBlock(MaidWorkContext context, BlockPos position, BlockState state) {
             return state.isAir()
-                    && context.actions().inventory().contains(Items.TORCH)
                     && context.level().getMaxLocalRawBrightness(position) <= MAX_TORCH_BLOCK_LIGHT
                     && Blocks.TORCH.defaultBlockState().canSurvive(context.level(), position)
                     && noNearbyTorch(context, position);
+        }
+
+        @Override
+        public Optional<WorkSupplyRequirement> supplyRequirement(
+                MaidWorkContext context,
+                WorkTarget target
+        ) {
+            return Optional.of(TORCH_SUPPLY);
         }
 
         @Override

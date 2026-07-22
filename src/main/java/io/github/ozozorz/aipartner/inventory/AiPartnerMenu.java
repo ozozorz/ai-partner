@@ -18,7 +18,9 @@ import io.github.ozozorz.aipartner.registry.ModMenus;
 import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import java.util.Optional;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
@@ -28,10 +30,18 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerData;
+import net.minecraft.world.inventory.CraftingContainer;
 import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.inventory.ResultContainer;
+import net.minecraft.world.inventory.ResultSlot;
 import net.minecraft.world.inventory.SimpleContainerData;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.inventory.TransientCraftingContainer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.CraftingInput;
+import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.equipment.Equippable;
@@ -44,7 +54,11 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
     public static final int STORAGE_SLOT_COUNT = 36;
     public static final int EQUIPMENT_SLOT_COUNT = AiPartnerEquipmentContainer.SLOT_COUNT;
     public static final int PARTNER_SLOT_END = STORAGE_SLOT_COUNT + EQUIPMENT_SLOT_COUNT;
-    public static final int PLAYER_SLOT_START = PARTNER_SLOT_END;
+    public static final int CRAFT_INPUT_SLOT_START = PARTNER_SLOT_END;
+    public static final int CRAFT_INPUT_SLOT_END = CRAFT_INPUT_SLOT_START + 4;
+    public static final int CRAFT_RESULT_SLOT = CRAFT_INPUT_SLOT_END;
+    public static final int CRAFT_SLOT_END = CRAFT_RESULT_SLOT + 1;
+    public static final int PLAYER_SLOT_START = CRAFT_SLOT_END;
     public static final int PLAYER_MAIN_SLOT_END = PLAYER_SLOT_START + 27;
     public static final int PLAYER_SLOT_END = PLAYER_SLOT_START + 36;
 
@@ -54,6 +68,10 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
     public static final int EQUIPMENT_TOP = 148;
     public static final int PLAYER_LEFT = 114;
     public static final int PLAYER_TOP = 140;
+    public static final int CRAFTING_LEFT = 290;
+    public static final int CRAFTING_TOP = 20;
+    public static final int CRAFTING_RESULT_LEFT = 354;
+    public static final int CRAFTING_RESULT_TOP = 29;
     public static final int SCREEN_WIDTH = 382;
     public static final int SCREEN_HEIGHT = 230;
 
@@ -78,6 +96,9 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
 
     private final @Nullable AiPartnerEntity partner;
     private final ContainerData stateData;
+    private final Player menuPlayer;
+    private final CraftingContainer craftingInput;
+    private final ResultContainer craftingResult;
 
     /**
      * 客户端工厂构造器；实体编号来自 Fabric 扩展菜单的打开数据。
@@ -103,6 +124,9 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
         super(ModMenus.AI_PARTNER, containerId);
         this.partner = partner;
         this.stateData = stateData;
+        this.menuPlayer = playerInventory.player;
+        this.craftingInput = new TransientCraftingContainer(this, 2, 2);
+        this.craftingResult = new ResultContainer();
         Container mainHand = partner == null
                 ? new SimpleContainer(1)
                 : new AiPartnerMainHandContainer(partner);
@@ -147,6 +171,25 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
                 InventoryMenu.EMPTY_ARMOR_SLOT_SHIELD
         ));
 
+        for (int row = 0; row < 2; row++) {
+            for (int column = 0; column < 2; column++) {
+                addSlot(new Slot(
+                        craftingInput,
+                        column + row * 2,
+                        CRAFTING_LEFT + column * 18,
+                        CRAFTING_TOP + row * 18
+                ));
+            }
+        }
+        addSlot(new ResultSlot(
+                playerInventory.player,
+                craftingInput,
+                craftingResult,
+                0,
+                CRAFTING_RESULT_LEFT,
+                CRAFTING_RESULT_TOP
+        ));
+
         addStandardInventorySlots(playerInventory, PLAYER_LEFT, PLAYER_TOP);
         addDataSlots(stateData);
         if (serverSide && partner != null) {
@@ -174,10 +217,16 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
 
         ItemStack source = sourceSlot.getItem();
         ItemStack original = source.copy();
-        if (slotIndex < PARTNER_SLOT_END) {
+        if (slotIndex < CRAFT_INPUT_SLOT_END) {
             if (!moveItemStackTo(source, PLAYER_SLOT_START, PLAYER_SLOT_END, true)) {
                 return ItemStack.EMPTY;
             }
+        } else if (slotIndex == CRAFT_RESULT_SLOT) {
+            source.getItem().onCraftedBy(source, player);
+            if (!moveItemStackTo(source, PLAYER_SLOT_START, PLAYER_SLOT_END, true)) {
+                return ItemStack.EMPTY;
+            }
+            sourceSlot.onQuickCraft(source, original);
         } else {
             boolean movedToEquipment = tryQuickEquip(source);
             if (!movedToEquipment && !moveItemStackTo(source, 1, STORAGE_SLOT_COUNT, false)) {
@@ -204,11 +253,26 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
 
     @Override
     public boolean clickMenuButton(Player player, int buttonId) {
-        Optional<PartnerMenuAction> action = PartnerMenuAction.fromButtonId(buttonId);
-        if (action.isEmpty()
-                || partner == null
+        if (partner == null
                 || !(player instanceof ServerPlayer serverPlayer)
                 || !stillValid(player)) {
+            return false;
+        }
+
+        Optional<MaidWorkMode> selectedWork = MaidWorkMode.fromMenuButtonId(buttonId);
+        if (selectedWork.isPresent()) {
+            partner.setWorkMode(selectedWork.get());
+            serverPlayer.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+                    "message.ai-partner.work_mode_set",
+                    net.minecraft.network.chat.Component.translatable(
+                            "work_mode.ai-partner." + selectedWork.get().serializedName()
+                    )
+            ));
+            return true;
+        }
+
+        Optional<PartnerMenuAction> action = PartnerMenuAction.fromButtonId(buttonId);
+        if (action.isEmpty()) {
             return false;
         }
 
@@ -271,9 +335,43 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
     @Override
     public void removed(Player player) {
         super.removed(player);
-        if (!player.level().isClientSide() && partner != null) {
-            partner.onInventoryMenuClosed(player);
+        if (!player.level().isClientSide()) {
+            clearContainer(player, craftingInput);
+            craftingResult.clearContent();
+            if (partner != null) {
+                partner.onInventoryMenuClosed(player);
+            }
         }
+    }
+
+    /** 服务端按原版 2×2 配方刷新结果槽；客户端只能接收同步结果。 */
+    @Override
+    public void slotsChanged(Container container) {
+        if (container != craftingInput
+                || !(menuPlayer instanceof ServerPlayer serverPlayer)
+                || !(menuPlayer.level() instanceof ServerLevel level)) {
+            return;
+        }
+        CraftingInput input = craftingInput.asCraftInput();
+        ItemStack result = ItemStack.EMPTY;
+        Optional<RecipeHolder<CraftingRecipe>> recipe = level.getServer()
+                .getRecipeManager()
+                .getRecipeFor(RecipeType.CRAFTING, input, level);
+        if (recipe.isPresent()
+                && craftingResult.setRecipeUsed(serverPlayer, recipe.get())) {
+            ItemStack assembled = recipe.get().value().assemble(input);
+            if (assembled.isItemEnabled(level.enabledFeatures())) {
+                result = assembled;
+            }
+        }
+        craftingResult.setItem(0, result);
+        setRemoteSlot(CRAFT_RESULT_SLOT, result);
+        serverPlayer.connection.send(new ClientboundContainerSetSlotPacket(
+                containerId,
+                incrementStateId(),
+                CRAFT_RESULT_SLOT,
+                result
+        ));
     }
 
     public @Nullable AiPartnerEntity partner() {

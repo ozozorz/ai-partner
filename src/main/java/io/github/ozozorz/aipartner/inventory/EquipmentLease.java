@@ -74,6 +74,38 @@ public final class EquipmentLease implements AutoCloseable {
     }
 
     /**
+     * 为允许徒手降级的工作临时清空主手；已有主手物品只会交换到真实空储物槽。
+     */
+    public static Optional<EquipmentLease> acquireBareHand(AiPartnerEntity partner) {
+        ItemStack mainHand = partner.getMainHandItem();
+        if (mainHand.isEmpty()) {
+            return Optional.of(new EquipmentLease(
+                    partner,
+                    ItemStack::isEmpty,
+                    NO_SOURCE_SLOT,
+                    mainHand,
+                    false
+            ));
+        }
+        SimpleContainer storage = partner.getInventory();
+        for (int slot = 0; slot < storage.getContainerSize(); slot++) {
+            if (!storage.getItem(slot).isEmpty()) {
+                continue;
+            }
+            storage.setItem(slot, mainHand);
+            partner.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+            return Optional.of(new EquipmentLease(
+                    partner,
+                    ItemStack::isEmpty,
+                    slot,
+                    partner.getMainHandItem(),
+                    true
+            ));
+        }
+        return Optional.empty();
+    }
+
+    /**
      * 世界重启后从已经持久化的主手和来源槽恢复租约元数据。
      */
     public static Optional<EquipmentLease> restore(

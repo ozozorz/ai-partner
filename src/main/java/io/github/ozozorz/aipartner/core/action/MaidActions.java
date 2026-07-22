@@ -15,7 +15,8 @@ public record MaidActions(
         PlaceBlockAction placeBlock,
         InteractEntityAction interactEntity,
         RangedAttackAction rangedAttack,
-        PickupItemAction pickupItem
+        PickupItemAction pickupItem,
+        CraftItemAction craftItem
 ) {
     public MaidActions {
         Objects.requireNonNull(navigation, "navigation");
@@ -27,6 +28,7 @@ public record MaidActions(
         Objects.requireNonNull(interactEntity, "interactEntity");
         Objects.requireNonNull(rangedAttack, "rangedAttack");
         Objects.requireNonNull(pickupItem, "pickupItem");
+        Objects.requireNonNull(craftItem, "craftItem");
     }
 
     public static MaidActions create(AiPartnerEntity partner) {
@@ -41,7 +43,8 @@ public record MaidActions(
                 new PlaceBlockAction(partner),
                 new InteractEntityAction(partner, inventory),
                 new RangedAttackAction(partner, inventory),
-                new PickupItemAction(partner)
+                new PickupItemAction(partner),
+                new CraftItemAction(partner)
         );
     }
 }

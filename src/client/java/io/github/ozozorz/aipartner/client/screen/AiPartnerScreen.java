@@ -7,7 +7,12 @@ import io.github.ozozorz.aipartner.entity.PartnerMode;
 import io.github.ozozorz.aipartner.inventory.AiPartnerMenu;
 import io.github.ozozorz.aipartner.job.JobType;
 import io.github.ozozorz.aipartner.life.ActivityLocationType;
+import io.github.ozozorz.aipartner.work.MaidWorkMode;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -19,6 +24,9 @@ import net.minecraft.world.entity.player.Inventory;
  * 展示女仆储物、装备、状态和行为按钮的客户端容器界面。
  */
 public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu> {
+    private static final int WORK_MODES_PER_PAGE = 6;
+    private static final int WORK_PAGE_COUNT = (MaidWorkMode.values().length + WORK_MODES_PER_PAGE - 1)
+            / WORK_MODES_PER_PAGE;
     private static final int PANEL_COLOR = 0xFF20242A;
     private static final int SUB_PANEL_COLOR = 0xFF2B3139;
     private static final int SLOT_BORDER_COLOR = 0xFF111418;
@@ -40,6 +48,13 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
     private Button sleepLocationClearButton;
     private Button workModeButton;
     private Button combatPolicyButton;
+    private Button panelToggleButton;
+    private Button previousWorkPageButton;
+    private Button nextWorkPageButton;
+    private final Map<MaidWorkMode, Button> directWorkButtons = new EnumMap<>(MaidWorkMode.class);
+    private final List<Button> schedulePanelButtons = new ArrayList<>();
+    private boolean workPanelOpen;
+    private int workPage;
 
     public AiPartnerScreen(AiPartnerMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title, AiPartnerMenu.SCREEN_WIDTH, AiPartnerMenu.SCREEN_HEIGHT);
@@ -52,6 +67,8 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
     @Override
     protected void init() {
         super.init();
+        directWorkButtons.clear();
+        schedulePanelButtons.clear();
         followButton = addRenderableWidget(createActionButton(
                 PartnerMenuAction.FOLLOW,
                 "gui.ai-partner.action.follow",
@@ -67,54 +84,54 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
                 "gui.ai-partner.action.cancel",
                 leftPos + 226
         ));
-        scheduleButton = addRenderableWidget(createSideButton(
+        scheduleButton = addSchedulePanelButton(createSideButton(
                 PartnerMenuAction.CYCLE_SCHEDULE,
                 "gui.ai-partner.schedule.day_shift",
                 290,
-                20,
+                82,
                 84
         ));
-        homeBoundButton = addRenderableWidget(createSideButton(
+        homeBoundButton = addSchedulePanelButton(createSideButton(
                 PartnerMenuAction.TOGGLE_HOME_BOUND,
                 "gui.ai-partner.home_bound.on",
                 290,
-                42,
-                84
+                102,
+                40
         ));
-        addRenderableWidget(createSideButton(
+        addSchedulePanelButton(createSideButton(
                 PartnerMenuAction.RETURN_HOME,
                 "gui.ai-partner.action.home",
-                290,
-                64,
-                84
+                334,
+                102,
+                40
         ));
         workLocationClearButton = addLocationButtons(
                 PartnerMenuAction.SET_WORK_LOCATION,
                 PartnerMenuAction.CLEAR_WORK_LOCATION,
-                100
+                132
         );
         leisureLocationClearButton = addLocationButtons(
                 PartnerMenuAction.SET_LEISURE_LOCATION,
                 PartnerMenuAction.CLEAR_LEISURE_LOCATION,
-                122
+                152
         );
         sleepLocationClearButton = addLocationButtons(
                 PartnerMenuAction.SET_SLEEP_LOCATION,
                 PartnerMenuAction.CLEAR_SLEEP_LOCATION,
-                144
+                172
         );
-        radiusDecreaseButton = addRenderableWidget(createSideButton(
+        radiusDecreaseButton = addSchedulePanelButton(createSideButton(
                 PartnerMenuAction.DECREASE_RADIUS,
                 "gui.ai-partner.radius.decrease",
                 290,
-                174,
+                202,
                 40
         ));
-        radiusIncreaseButton = addRenderableWidget(createSideButton(
+        radiusIncreaseButton = addSchedulePanelButton(createSideButton(
                 PartnerMenuAction.INCREASE_RADIUS,
                 "gui.ai-partner.radius.increase",
                 334,
-                174,
+                202,
                 40
         ));
         workModeButton = addRenderableWidget(createSideButton(
@@ -131,6 +148,45 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
                 196,
                 96
         ));
+        panelToggleButton = addRenderableWidget(Button.builder(
+                        Component.translatable("gui.ai-partner.panel.show_work"),
+                        ignored -> {
+                            workPanelOpen = !workPanelOpen;
+                            updatePanelVisibility();
+                        }
+                )
+                .bounds(leftPos + 290, topPos + 60, 84, 18)
+                .build());
+        for (MaidWorkMode mode : MaidWorkMode.values()) {
+            int index = mode.ordinal();
+            int row = index % WORK_MODES_PER_PAGE;
+            Button button = Button.builder(
+                            Component.translatable("work_mode.ai-partner." + mode.serializedName()),
+                            ignored -> sendMenuButton(mode.menuButtonId())
+                    )
+                    .bounds(leftPos + 290, topPos + 82 + row * 20, 84, 18)
+                    .build();
+            directWorkButtons.put(mode, addRenderableWidget(button));
+        }
+        previousWorkPageButton = addRenderableWidget(Button.builder(
+                        Component.literal("<"),
+                        ignored -> {
+                            workPage = Math.max(0, workPage - 1);
+                            updatePanelVisibility();
+                        }
+                )
+                .bounds(leftPos + 290, topPos + 202, 40, 18)
+                .build());
+        nextWorkPageButton = addRenderableWidget(Button.builder(
+                        Component.literal(">"),
+                        ignored -> {
+                            workPage = Math.min(WORK_PAGE_COUNT - 1, workPage + 1);
+                            updatePanelVisibility();
+                        }
+                )
+                .bounds(leftPos + 334, topPos + 202, 40, 18)
+                .build());
+        updatePanelVisibility();
         updateButtonStates();
     }
 
@@ -156,12 +212,20 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
         graphics.fill(x + 4, y + 16, x + 106, y + imageHeight - 6, SUB_PANEL_COLOR);
         graphics.fill(x + 110, y + 16, x + imageWidth - 4, y + 94, SUB_PANEL_COLOR);
         graphics.fill(x + 110, y + 124, x + imageWidth - 4, y + imageHeight - 6, SUB_PANEL_COLOR);
-        graphics.fill(x + 286, y + 16, x + imageWidth - 4, y + imageHeight - 6, SUB_PANEL_COLOR);
+        graphics.fill(x + 286, y + 16, x + 378, y + imageHeight - 6, SUB_PANEL_COLOR);
 
         drawSlotGrid(graphics, x + AiPartnerMenu.STORAGE_LEFT, y + AiPartnerMenu.STORAGE_TOP, 9, 4);
         drawSlotGrid(graphics, x + AiPartnerMenu.EQUIPMENT_LEFT, y + AiPartnerMenu.EQUIPMENT_TOP, 5, 1);
         drawSlotGrid(graphics, x + AiPartnerMenu.PLAYER_LEFT, y + AiPartnerMenu.PLAYER_TOP, 9, 3);
         drawSlotGrid(graphics, x + AiPartnerMenu.PLAYER_LEFT, y + AiPartnerMenu.PLAYER_TOP + 58, 9, 1);
+        drawSlotGrid(graphics, x + AiPartnerMenu.CRAFTING_LEFT, y + AiPartnerMenu.CRAFTING_TOP, 2, 2);
+        drawSlotGrid(
+                graphics,
+                x + AiPartnerMenu.CRAFTING_RESULT_LEFT,
+                y + AiPartnerMenu.CRAFTING_RESULT_TOP,
+                1,
+                1
+        );
 
         AiPartnerEntity partner = menu.partner();
         if (partner != null) {
@@ -206,16 +270,27 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
         graphics.text(font, healthLine(), 8, 130, MUTED_LABEL_COLOR, false);
         graphics.text(
                 font,
-                Component.translatable("gui.ai-partner.schedule_panel"),
+                Component.translatable("gui.ai-partner.personal_crafting"),
                 290,
                 7,
                 LABEL_COLOR,
                 false
         );
-        graphics.text(font, activityLine(), 290, 88, MUTED_LABEL_COLOR, false);
-        graphics.text(font, radiusLine(), 290, 164, MUTED_LABEL_COLOR, false);
-        graphics.text(font, growthLine(), 290, 199, MUTED_LABEL_COLOR, false);
-        graphics.text(font, affectionLine(), 290, 211, MUTED_LABEL_COLOR, false);
+        graphics.text(font, Component.literal("→"), 334, 34, MUTED_LABEL_COLOR, false);
+        if (workPanelOpen) {
+            graphics.text(
+                    font,
+                    Component.translatable("gui.ai-partner.work_page", workPage + 1, WORK_PAGE_COUNT),
+                    290,
+                    221,
+                    MUTED_LABEL_COLOR,
+                    false
+            );
+        } else {
+            graphics.text(font, activityLine(), 290, 122, MUTED_LABEL_COLOR, false);
+            graphics.text(font, radiusLine(), 290, 192, MUTED_LABEL_COLOR, false);
+            graphics.text(font, growthAffectionLine(), 290, 221, MUTED_LABEL_COLOR, false);
+        }
     }
 
     private Button createActionButton(PartnerMenuAction action, String translationKey, int x) {
@@ -237,14 +312,14 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
     }
 
     private Button addLocationButtons(PartnerMenuAction setAction, PartnerMenuAction clearAction, int relativeY) {
-        addRenderableWidget(createSideButton(
+        addSchedulePanelButton(createSideButton(
                 setAction,
                 "gui.ai-partner.action." + setAction.name().toLowerCase(Locale.ROOT),
                 290,
                 relativeY,
                 40
         ));
-        return addRenderableWidget(createSideButton(
+        return addSchedulePanelButton(createSideButton(
                 clearAction,
                 "gui.ai-partner.action." + clearAction.name().toLowerCase(Locale.ROOT),
                 334,
@@ -253,9 +328,42 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
         ));
     }
 
+    /** 注册只属于生活/日程分页的按钮，切页时统一隐藏，避免与工作按钮重叠。 */
+    private Button addSchedulePanelButton(Button button) {
+        schedulePanelButtons.add(button);
+        return addRenderableWidget(button);
+    }
+
+    /** 在固定宽度侧栏中切换日程页或六项一页的具体工作选择。 */
+    private void updatePanelVisibility() {
+        workPage = Math.clamp(workPage, 0, WORK_PAGE_COUNT - 1);
+        schedulePanelButtons.forEach(button -> button.visible = !workPanelOpen);
+        directWorkButtons.forEach((mode, button) -> button.visible = workPanelOpen
+                && mode.ordinal() / WORK_MODES_PER_PAGE == workPage);
+        if (previousWorkPageButton != null) {
+            previousWorkPageButton.visible = workPanelOpen;
+            previousWorkPageButton.active = workPage > 0;
+        }
+        if (nextWorkPageButton != null) {
+            nextWorkPageButton.visible = workPanelOpen;
+            nextWorkPageButton.active = workPage < WORK_PAGE_COUNT - 1;
+        }
+        if (panelToggleButton != null) {
+            panelToggleButton.setMessage(Component.translatable(
+                    workPanelOpen
+                            ? "gui.ai-partner.panel.show_schedule"
+                            : "gui.ai-partner.panel.show_work"
+            ));
+        }
+    }
+
     private void sendAction(PartnerMenuAction action) {
+        sendMenuButton(action.buttonId());
+    }
+
+    private void sendMenuButton(int buttonId) {
         if (minecraft != null && minecraft.gameMode != null) {
-            minecraft.gameMode.handleInventoryButtonClick(menu.containerId, action.buttonId());
+            minecraft.gameMode.handleInventoryButtonClick(menu.containerId, buttonId);
         }
     }
 
@@ -271,7 +379,11 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
                 || leisureLocationClearButton == null
                 || sleepLocationClearButton == null
                 || workModeButton == null
-                || combatPolicyButton == null) {
+                || combatPolicyButton == null
+                || panelToggleButton == null
+                || previousWorkPageButton == null
+                || nextWorkPageButton == null
+                || directWorkButtons.size() != MaidWorkMode.values().length) {
             return;
         }
         PartnerMode mode = menu.displayedMode();
@@ -299,6 +411,8 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
                 "gui.ai-partner.work_mode_button",
                 Component.translatable("work_mode.ai-partner." + menu.displayedWorkMode().serializedName())
         ));
+        directWorkButtons.forEach((workMode, button) -> button.active = workMode != menu.displayedWorkMode());
+        updatePanelVisibility();
         combatPolicyButton.setMessage(Component.translatable(
                 "gui.ai-partner.combat_policy_button",
                 Component.translatable(
@@ -357,16 +471,13 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
         return Component.translatable("gui.ai-partner.radius", menu.displayedActivityRadius());
     }
 
-    private Component growthLine() {
+    private Component growthAffectionLine() {
         return Component.translatable(
-                "gui.ai-partner.growth",
+                "gui.ai-partner.growth_affection_compact",
                 menu.displayedGrowthLevel(),
-                menu.displayedGrowthExperience()
+                menu.displayedGrowthExperience(),
+                menu.displayedAffection()
         );
-    }
-
-    private Component affectionLine() {
-        return Component.translatable("gui.ai-partner.affection", menu.displayedAffection());
     }
 
     private static boolean hasConfiguredLocation(int mask, ActivityLocationType type) {

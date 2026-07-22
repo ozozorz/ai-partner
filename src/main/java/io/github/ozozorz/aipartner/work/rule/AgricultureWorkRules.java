@@ -6,6 +6,7 @@ import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import io.github.ozozorz.aipartner.work.MaidWorkRule;
 import io.github.ozozorz.aipartner.work.WorkActionResult;
 import io.github.ozozorz.aipartner.work.WorkTarget;
+import io.github.ozozorz.aipartner.work.supply.WorkSupplyRequirement;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -295,6 +296,16 @@ public final class AgricultureWorkRules {
 
     /** 仅在拥有锹时清除雪层或雪块，并按原版工具规则消耗耐久。 */
     private static final class SnowRule extends BlockRule {
+        private static final WorkSupplyRequirement SHOVEL_SUPPLY = new WorkSupplyRequirement(
+                "snow_shovel",
+                partner -> partner.getMainHandItem().typeHolder().is(ItemTags.SHOVELS)
+                        || partner.getInventory().getItems().stream().anyMatch(
+                        stack -> !stack.isEmpty() && stack.typeHolder().is(ItemTags.SHOVELS)
+                ),
+                List.of(Items.WOODEN_SHOVEL, Items.STONE_SHOVEL, Items.IRON_SHOVEL),
+                false
+        );
+
         private SnowRule() {
             super(MaidWorkMode.SNOW_CLEARER);
         }
@@ -302,8 +313,15 @@ public final class AgricultureWorkRules {
         @Override
         public boolean matchesBlock(MaidWorkContext context, BlockPos position, BlockState state) {
             return (state.is(Blocks.SNOW) || state.is(Blocks.SNOW_BLOCK))
-                    && hasShovel(context)
                     && context.actions().inventory().hasAnySpace();
+        }
+
+        @Override
+        public Optional<WorkSupplyRequirement> supplyRequirement(
+                MaidWorkContext context,
+                WorkTarget target
+        ) {
+            return Optional.of(SHOVEL_SUPPLY);
         }
 
         @Override
@@ -323,12 +341,6 @@ public final class AgricultureWorkRules {
             }
         }
 
-        private static boolean hasShovel(MaidWorkContext context) {
-            return context.partner().getMainHandItem().typeHolder().is(ItemTags.SHOVELS)
-                    || context.actions().inventory().contains(
-                            stack -> !stack.isEmpty() && stack.typeHolder().is(ItemTags.SHOVELS)
-                    );
-        }
     }
 
     private abstract static class BlockRule implements MaidWorkRule {

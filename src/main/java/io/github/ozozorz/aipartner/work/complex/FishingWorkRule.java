@@ -9,6 +9,7 @@ import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import io.github.ozozorz.aipartner.work.MaidWorkRule;
 import io.github.ozozorz.aipartner.work.WorkActionResult;
 import io.github.ozozorz.aipartner.work.WorkTarget;
+import io.github.ozozorz.aipartner.work.supply.WorkSupplyRequirement;
 import java.util.Iterator;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
@@ -41,6 +42,13 @@ public final class FishingWorkRule implements MaidWorkRule {
     private static final double ARRIVAL_DISTANCE_SQUARED = 4.0;
     private static final double DROP_SEARCH_RADIUS = 8.0;
     private static final String COOLDOWN_TAG = "ComplexFishingCooldown";
+    private static final WorkSupplyRequirement ROD_SUPPLY = new WorkSupplyRequirement(
+            "fisher_rod",
+            partner -> partner.getMainHandItem().is(Items.FISHING_ROD)
+                    || partner.getInventory().getItems().stream().anyMatch(stack -> stack.is(Items.FISHING_ROD)),
+            java.util.List.of(Items.FISHING_ROD),
+            false
+    );
 
     private State state = State.SEARCH_WATER;
     private @Nullable Iterator<BlockPos> scanIterator;
@@ -75,6 +83,14 @@ public final class FishingWorkRule implements MaidWorkRule {
     @Override
     public boolean managesOwnExecution() {
         return true;
+    }
+
+    @Override
+    public java.util.Optional<WorkSupplyRequirement> supplyRequirement(
+            MaidWorkContext context,
+            WorkTarget target
+    ) {
+        return java.util.Optional.of(ROD_SUPPLY);
     }
 
     /** 抛竿与收竿沿用原版钓鱼语义，不会修改世界方块。 */

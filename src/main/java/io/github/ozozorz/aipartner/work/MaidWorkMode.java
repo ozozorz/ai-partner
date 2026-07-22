@@ -27,6 +27,8 @@ public enum MaidWorkMode {
     SMELTER("smelter"),
     FISHER("fisher");
 
+    private static final int MENU_BUTTON_BASE = 100;
+
     private final String serializedName;
 
     MaidWorkMode(String serializedName) {
@@ -40,6 +42,17 @@ public enum MaidWorkMode {
     public MaidWorkMode next() {
         MaidWorkMode[] modes = values();
         return modes[(ordinal() + 1) % modes.length];
+    }
+
+    /** 每个具体工作使用独立且有界的菜单按钮编号，不接受客户端提交任意枚举序号。 */
+    public int menuButtonId() {
+        return MENU_BUTTON_BASE + ordinal();
+    }
+
+    public static Optional<MaidWorkMode> fromMenuButtonId(int buttonId) {
+        int ordinal = buttonId - MENU_BUTTON_BASE;
+        MaidWorkMode[] modes = values();
+        return ordinal >= 0 && ordinal < modes.length ? Optional.of(modes[ordinal]) : Optional.empty();
     }
 
     public static Optional<MaidWorkMode> parse(String value) {

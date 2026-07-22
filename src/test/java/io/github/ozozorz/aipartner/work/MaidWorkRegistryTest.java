@@ -29,6 +29,15 @@ class MaidWorkRegistryTest {
     }
 
     @Test
+    void mapsOnlyConcreteWorkPanelButtonRange() {
+        for (MaidWorkMode mode : MaidWorkMode.values()) {
+            assertEquals(mode, MaidWorkMode.fromMenuButtonId(mode.menuButtonId()).orElseThrow());
+        }
+        assertTrue(MaidWorkMode.fromMenuButtonId(99).isEmpty());
+        assertTrue(MaidWorkMode.fromMenuButtonId(100 + MaidWorkMode.values().length).isEmpty());
+    }
+
+    @Test
     void onlyWorldMutatingWorkRequiresMobGriefing() {
         MaidWorkRegistry registry = MaidWorkRegistry.createDefault();
         assertTrue(registry.ruleFor(MaidWorkMode.LUMBERJACK).orElseThrow().requiresMobGriefing());

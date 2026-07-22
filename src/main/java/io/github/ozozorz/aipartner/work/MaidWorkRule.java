@@ -2,6 +2,7 @@ package io.github.ozozorz.aipartner.work;
 
 import java.util.Optional;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
+import io.github.ozozorz.aipartner.work.supply.WorkSupplyRequirement;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
@@ -34,6 +35,16 @@ public interface MaidWorkRule {
      * 返回规则内部已经批准的下一目标，例如一棵树中按安全顺序处理的下一段原木。
      */
     default Optional<WorkTarget> findPriorityTarget(MaidWorkContext context) {
+        return Optional.empty();
+    }
+
+    /**
+     * 返回当前目标执行前需要保证的物资；空值表示该规则不需要自动制作或工作台准备。
+     */
+    default Optional<WorkSupplyRequirement> supplyRequirement(
+            MaidWorkContext context,
+            @org.jspecify.annotations.Nullable WorkTarget target
+    ) {
         return Optional.empty();
     }
 
