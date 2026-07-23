@@ -6,7 +6,7 @@ import java.util.UUID;
 import net.minecraft.network.chat.Component;
 import org.jspecify.annotations.Nullable;
 
-/** Server-authoritative action receipt consumed by commands, menus, and workflows. */
+/** Server-authoritative action receipt consumed by commands, menus, and local dialogue. */
 public record MaidControlDecision(
         MaidActionCompletion completion,
         Component message,

@@ -9,7 +9,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.KeyMapping;
 import org.lwjgl.glfw.GLFW;
 
-/** Registers the default R key and receives server-authoritative dialogue settings. */
+/** 注册默认 R 键并接收服务端确认的对话目标。 */
 public final class MaidConversationClient {
     private static final KeyMapping OPEN_DIALOGUE = KeyMappingHelper.registerKeyMapping(new KeyMapping(
             "key.ai-partner.open_dialogue",

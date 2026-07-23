@@ -8,7 +8,7 @@ import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import java.util.Objects;
 
 /**
- * 命令、UI、本地解析器和 LLM 共用的类型化高层意图；不允许携带任意命令或世界坐标。
+ * 命令、UI 和本地解析器共用的类型化高层意图；不允许携带任意命令或世界坐标。
  */
 public sealed interface MaidControlIntent {
     record RunTask(JobSpec job) implements MaidControlIntent {

@@ -7,16 +7,8 @@ import io.github.ozozorz.aipartner.combat.MaidCombatController;
 import io.github.ozozorz.aipartner.core.behavior.MaidBehaviorController;
 import io.github.ozozorz.aipartner.core.behavior.ManualDirective;
 import io.github.ozozorz.aipartner.core.task.MaidTaskRuntime;
-import io.github.ozozorz.aipartner.config.AiPartnerConfig;
 import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
-import io.github.ozozorz.aipartner.control.MaidDriveMode;
-import io.github.ozozorz.aipartner.control.MaidDriverSettings;
-import io.github.ozozorz.aipartner.conversation.MaidConversationMemory;
-import io.github.ozozorz.aipartner.entity.goal.AiPartnerFollowOwnerGoal;
-import io.github.ozozorz.aipartner.entity.goal.AiPartnerIdleWanderGoal;
-import io.github.ozozorz.aipartner.entity.goal.AiPartnerMeleeCombatGoal;
-import io.github.ozozorz.aipartner.entity.goal.AiPartnerRangedCombatGoal;
-import io.github.ozozorz.aipartner.entity.goal.AiPartnerReturnToActivityGoal;
+import io.github.ozozorz.aipartner.entity.ai.MaidAi;
 import io.github.ozozorz.aipartner.entity.navigation.AiPartnerPathNavigation;
 import io.github.ozozorz.aipartner.growth.MaidGrowthData;
 import io.github.ozozorz.aipartner.growth.MaidGrowthController;
@@ -33,9 +25,6 @@ import io.github.ozozorz.aipartner.registry.ModTasks;
 import io.github.ozozorz.aipartner.service.PartnerService;
 import io.github.ozozorz.aipartner.work.MaidWorkController;
 import io.github.ozozorz.aipartner.work.MaidWorkMode;
-import io.github.ozozorz.aipartner.workflow.MaidWorkflowRuntime;
-import io.github.ozozorz.aipartner.workflow.MaidWorkflowSpec;
-import io.github.ozozorz.aipartner.workflow.MaidWorkflowStartResult;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleActivity;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
 import java.util.ArrayList;
@@ -63,14 +52,14 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.Brain;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.ai.goal.FloatGoal;
-import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
-import net.minecraft.world.entity.ai.goal.OpenDoorGoal;
-import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
+import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
+import net.minecraft.world.entity.schedule.Activity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.InventoryCarrier;
 import net.minecraft.world.entity.player.Inventory;
@@ -108,12 +97,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             AiPartnerEntity.class,
             EntityDataSerializers.STRING
     );
-    private static final EntityDataAccessor<Integer> DATA_DRIVE_MODE = SynchedEntityData.defineId(
-            AiPartnerEntity.class,
-            EntityDataSerializers.INT
-    );
     private final SimpleContainer inventory = new SimpleContainer(MaidInventoryPersistence.STORAGE_SLOT_COUNT);
-    private final MaidConversationMemory conversationMemory = new MaidConversationMemory();
     private final MaidGrowthData growthData = new MaidGrowthData();
     private final MaidGrowthController growthController = new MaidGrowthController(this, growthData);
     private final MaidBehaviorController behaviorController = new MaidBehaviorController(this);
@@ -122,7 +106,6 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             behaviorController,
             ModTasks.createRegistry()
     );
-    private final MaidWorkflowRuntime workflowRuntime = new MaidWorkflowRuntime(this, taskRuntime);
     private final MaidGameplayConfig gameplayConfig = MaidGameplayConfig.get();
     private final MaidLifeController lifeController = new MaidLifeController(
             this,
@@ -143,12 +126,40 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
             gameplayConfig
     );
     private final List<ItemStack> pendingMigrationDrops = new ArrayList<>();
+    private Activity brainActivity = Activity.IDLE;
     private int appliedGrowthLevel = -1;
     private boolean ownershipRegistered;
 
     public AiPartnerEntity(EntityType<? extends AiPartnerEntity> entityType, Level level) {
         super(entityType, level);
         setCanPickUpLoot(true);
+    }
+
+    /**
+     * 使用女仆专用 Provider 从存档记忆构造 Brain。
+     */
+    @Override
+    protected Brain<AiPartnerEntity> makeBrain(Brain.Packed packedBrain) {
+        return MaidAi.brainProvider().makeBrain(this, packedBrain);
+    }
+
+    /**
+     * 提供精确泛型，供传感器与行为安全访问女仆记忆。
+     */
+    @Override
+    @SuppressWarnings("unchecked")
+    public Brain<AiPartnerEntity> getBrain() {
+        return (Brain<AiPartnerEntity>) (Brain<?>) super.getBrain();
+    }
+
+    /**
+     * 按原版顺序推进 Brain，再根据最新记忆选择非核心 Activity。
+     */
+    @Override
+    protected void customServerAiStep(ServerLevel level) {
+        getBrain().tick(level, this);
+        MaidAi.updateActivity(this);
+        super.customServerAiStep(level);
     }
 
     /**
@@ -165,15 +176,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
 
     @Override
     protected void registerGoals() {
-        goalSelector.addGoal(0, new FloatGoal(this));
-        goalSelector.addGoal(1, new AiPartnerRangedCombatGoal(this));
-        goalSelector.addGoal(2, new AiPartnerMeleeCombatGoal(this));
-        goalSelector.addGoal(3, new AiPartnerFollowOwnerGoal(this, 1.05, 5.0F, 3.0F));
-        goalSelector.addGoal(4, new OpenDoorGoal(this, true));
-        goalSelector.addGoal(5, new AiPartnerReturnToActivityGoal(this, 0.9));
-        goalSelector.addGoal(6, new AiPartnerIdleWanderGoal(this, 0.65));
-        goalSelector.addGoal(7, new LookAtPlayerGoal(this, Player.class, 8.0F, 0.035F));
-        goalSelector.addGoal(8, new RandomLookAroundGoal(this));
+        // 女仆的自主行为全部由 Brain 活动和行为系统驱动。
     }
 
     /**
@@ -191,7 +194,6 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         builder.define(DATA_SPEECH_BUBBLE, Optional.empty());
         builder.define(DATA_SPEECH_BUBBLE_UNTIL, 0L);
         builder.define(DATA_SKIN_HASH, "");
-        builder.define(DATA_DRIVE_MODE, MaidDriveMode.LOCAL.ordinal());
     }
 
     /** 把语义动作注册表已验证的契约交给通用运行时。 */
@@ -247,51 +249,11 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         return taskRuntime.currentContract();
     }
 
-    /** Starts a server-owned bounded sequence of existing semantic actions. */
-    public MaidWorkflowStartResult startWorkflow(MaidWorkflowSpec spec, ServerPlayer actor) {
-        return workflowRuntime.start(spec, actor);
-    }
-
-    /** Applies an asynchronously generated replacement plan to the same workflow contract. */
-    public boolean applyWorkflowReplan(
-            java.util.UUID workflowId,
-            java.util.List<io.github.ozozorz.aipartner.control.MaidControlIntent> replacement,
-            ServerPlayer actor
-    ) {
-        return workflowRuntime.applyReplan(workflowId, replacement, actor);
-    }
-
-    /** Fails a workflow when its single authorized replan cannot be obtained safely. */
-    public void rejectWorkflowReplan(java.util.UUID workflowId, String detail) {
-        workflowRuntime.rejectReplan(workflowId, detail);
-    }
-
-    /** Interrupts a workflow before an external mutating command or menu action is applied. */
-    public void interruptActiveWorkflow(@Nullable ServerPlayer actor, String reason) {
-        workflowRuntime.cancel(actor, reason);
-    }
-
-    /** Cancels one matching workflow without allowing stale model requests to cancel a replacement. */
-    public void interruptWorkflow(java.util.UUID workflowId, @Nullable ServerPlayer actor, String reason) {
-        workflowRuntime.cancel(workflowId, actor, reason);
-    }
-
-    /** Verifies that a workflow-scoped invocation belongs to the current runtime cursor. */
-    public boolean acceptsWorkflowInvocation(java.util.UUID workflowId) {
-        return workflowRuntime.acceptsInvocation(workflowId);
-    }
-
-    public boolean hasActiveWorkflow() {
-        return workflowRuntime.hasActiveWorkflow();
-    }
-
-    public String workflowSummary() {
-        return workflowRuntime.summary();
-    }
-
-    /** Returns the bounded dialogue memory used for continuity and entity persistence. */
-    public MaidConversationMemory conversationMemory() {
-        return conversationMemory;
+    /**
+     * 有限任务自行推进导航时，Brain 只保留战斗中断能力。
+     */
+    public boolean hasFiniteTaskRunning() {
+        return taskRuntime.hasFiniteTaskRunning();
     }
 
     public boolean canUseAmbientMovement() {
@@ -396,16 +358,79 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         combatController.setPolicy(policy);
     }
 
-    public boolean shouldUseRangedCombat() {
-        return combatController.shouldUseRangedCombat();
+    public boolean shouldUseRangedCombat(LivingEntity target) {
+        return combatController.shouldUseRangedCombat(target);
     }
 
-    public boolean shouldUseMeleeCombat() {
-        return combatController.shouldUseMeleeCombat();
+    public boolean shouldUseMeleeCombat(LivingEntity target) {
+        return combatController.shouldUseMeleeCombat(target);
+    }
+
+    /**
+     * 供威胁传感器选择自身或主人最近的合法攻击来源。
+     */
+    public Optional<LivingEntity> selectDefensiveThreat() {
+        return combatController.selectThreat();
+    }
+
+    public boolean isLegalCombatTarget(@Nullable LivingEntity target) {
+        return combatController.isLegalTarget(target);
+    }
+
+    /**
+     * 接受 Brain 已验证的战斗目标，并投影为原版 Mob 目标与客户端显示模式。
+     */
+    public void acceptBrainCombatTarget(LivingEntity target) {
+        setTarget(target);
+        behaviorController.setTemporaryInterruption(PartnerMode.FIGHTING);
+    }
+
+    /**
+     * 原子清除战斗相关记忆、导航意图和显示投影。
+     */
+    public void clearBrainCombatTarget() {
+        getBrain().eraseMemory(MemoryModuleType.ATTACK_TARGET);
+        getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+        getBrain().eraseMemory(MemoryModuleType.LOOK_TARGET);
+        getBrain().eraseMemory(MemoryModuleType.CANT_REACH_WALK_TARGET_SINCE);
+        setTarget(null);
+        behaviorController.clearTemporaryInterruption();
+    }
+
+    public boolean tryRangedBrainAttack(LivingEntity target, float power) {
+        return combatController.performRangedAttack(target, power);
+    }
+
+    public boolean tryMeleeBrainAttack(ServerLevel level, LivingEntity target) {
+        return combatController.performMeleeAttack(level, target);
+    }
+
+    /**
+     * Activity 切换只管理临时战斗投影，不销毁被中断的任务或长期指令。
+     */
+    public void onBrainActivityChanged(Activity activity) {
+        boolean changed = activity != brainActivity;
+        brainActivity = activity;
+        if (activity == Activity.FIGHT) {
+            if (changed) {
+                getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+                getBrain().eraseMemory(MemoryModuleType.LOOK_TARGET);
+                getBrain().eraseMemory(MemoryModuleType.CANT_REACH_WALK_TARGET_SINCE);
+                getNavigation().stop();
+            }
+            getBrain().getMemory(MemoryModuleType.ATTACK_TARGET)
+                    .filter(combatController::isLegalTarget)
+                    .ifPresent(this::acceptBrainCombatTarget);
+            return;
+        }
+        if (getTarget() != null) {
+            setTarget(null);
+        }
+        behaviorController.clearTemporaryInterruption();
     }
 
     @Override
-    public void performRangedAttack(net.minecraft.world.entity.LivingEntity target, float power) {
+    public void performRangedAttack(LivingEntity target, float power) {
         combatController.performRangedAttack(target, power);
     }
 
@@ -515,9 +540,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     @Override
     public void tick() {
         super.tick();
-        combatController.tick();
         taskRuntime.tick();
-        workflowRuntime.tick();
         lifeController.tick();
         workController.tick();
         pickupController.tick();
@@ -710,9 +733,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
     protected void addAdditionalSaveData(ValueOutput output) {
         super.addAdditionalSaveData(output);
         MaidInventoryPersistence.save(inventory, output);
-        conversationMemory.save(output);
         taskRuntime.save(output);
-        workflowRuntime.save(output);
         lifeController.save(output);
         workController.save(output);
         combatController.save(output);
@@ -721,7 +742,6 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         if (!getSkinHash().isEmpty()) {
             output.putString("MaidSkinHash", getSkinHash());
         }
-        output.putString("MaidDriveMode", getDriveMode().serializedName());
     }
 
     @Override
@@ -737,9 +757,7 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         setItemSlot(EquipmentSlot.MAINHAND, inventoryLoad.mainHand());
         pendingMigrationDrops.clear();
         pendingMigrationDrops.addAll(inventoryLoad.overflow());
-        conversationMemory.load(input);
         taskRuntime.load(input);
-        workflowRuntime.load(input);
         lifeController.load(input);
         workController.load(input);
         combatController.load(input);
@@ -747,7 +765,6 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         growthController.load(input);
         appliedGrowthLevel = -1;
         setSkinHash(input.getStringOr("MaidSkinHash", ""));
-        setDriveMode(MaidDriveMode.fromSavedName(input.getStringOr("MaidDriveMode", "local")));
         ownershipRegistered = false;
     }
 
@@ -830,36 +847,12 @@ public final class AiPartnerEntity extends TamableAnimal implements InventoryCar
         return entityData.get(DATA_SKIN_HASH);
     }
 
-    /** Returns the selected natural-language interpretation driver. */
-    public MaidDriveMode getDriveMode() {
-        int ordinal = entityData.get(DATA_DRIVE_MODE);
-        MaidDriveMode[] modes = MaidDriveMode.values();
-        return ordinal >= 0 && ordinal < modes.length ? modes[ordinal] : MaidDriveMode.LOCAL;
-    }
-
-    /** Changes only the high-level interpreter; world actions remain server-authoritative. */
-    public void setDriveMode(MaidDriveMode mode) {
-        entityData.set(DATA_DRIVE_MODE, java.util.Objects.requireNonNull(mode, "mode").ordinal());
-    }
-
-    /** Returns the server-owned credential variable name, never the secret stored under it. */
-    public String getLlmApiKeyEnvironmentVariable() {
-        return defaultApiKeyEnvironmentVariable();
-    }
-
     /**
      * 只接受服务端验证器生成的 SHA-256 十六进制标识；空值恢复 Alex 外观。
      */
     public void setSkinHash(String hash) {
         String normalized = hash == null ? "" : hash.toLowerCase(java.util.Locale.ROOT);
         entityData.set(DATA_SKIN_HASH, normalized.matches("[0-9a-f]{64}") ? normalized : "");
-    }
-
-    private static String defaultApiKeyEnvironmentVariable() {
-        String configured = AiPartnerConfig.get().apiKeyEnvironmentVariable();
-        return MaidDriverSettings.isValidEnvironmentVariableName(configured)
-                ? configured.strip()
-                : "DEEPSEEK_API_KEY";
     }
 
     private void dropPendingMigrationItems() {

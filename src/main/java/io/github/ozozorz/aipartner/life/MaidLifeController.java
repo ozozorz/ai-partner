@@ -23,7 +23,7 @@ import net.minecraft.world.level.storage.ValueOutput;
 import org.jspecify.annotations.Nullable;
 
 /**
- * 仲裁日程、地点约束、回家和睡眠，并把导航目标交给独立 Goal 执行。
+ * 仲裁日程、地点约束、回家和睡眠，并把导航目标写入 Brain 活动记忆。
  */
 public final class MaidLifeController {
     private static final int BED_RESCAN_INTERVAL_TICKS = 100;
@@ -221,7 +221,7 @@ public final class MaidLifeController {
     }
 
     /**
-     * 返回给活动导航 Goal 的当前目标；跨维度地点不会产生导航目标。
+     * 返回给活动导航行为的当前目标；跨维度地点不会产生导航目标。
      */
     public Optional<BlockPos> movementTarget() {
         return Optional.ofNullable(movementTarget);

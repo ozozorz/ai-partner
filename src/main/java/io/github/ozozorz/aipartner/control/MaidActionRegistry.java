@@ -16,8 +16,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
 /**
- * Canonical semantic-action registry used by commands, menu buttons, local language control,
- * and LLM workflows. Every mutation is admitted and verified against the same IBC declaration.
+ * Canonical semantic-action registry used by commands, menu buttons, and local language control.
+ * Every mutation is admitted and verified against the same IBC declaration.
  */
 public final class MaidActionRegistry {
     private static final List<MaidContractPredicate> COMMON_PRECONDITIONS = List.of(
@@ -93,26 +93,12 @@ public final class MaidActionRegistry {
             return rejected;
         }
 
-        if (request.workflowId() != null) {
-            if (!partner.acceptsWorkflowInvocation(request.workflowId())) {
-                return MaidControlDecision.rejected(
-                        Component.translatable("message.ai-partner.failed", FailureCode.CANCELLED_BY_PLAYER.name()),
-                        FailureCode.CANCELLED_BY_PLAYER,
-                        "workflow_invocation_not_current"
-                );
-            }
-        }
-
         ContractDecision preparedTask = null;
         if (intent instanceof MaidControlIntent.RunTask runTask) {
             preparedTask = ContractCompiler.compile(partner, actor, runTask.job());
             if (!preparedTask.accepted()) {
                 return rejectedTaskDecision(preparedTask);
             }
-        }
-
-        if (request.workflowId() == null && !isReadOnly(intent)) {
-            partner.interruptActiveWorkflow(actor, "external_action:" + request.sourceId());
         }
 
         MaidControlDecision result = switch (intent) {
@@ -424,11 +410,6 @@ public final class MaidActionRegistry {
 
     private static boolean isImmediateDirective(JobType type) {
         return type == JobType.FOLLOW || type == JobType.STAY || type == JobType.CANCEL;
-    }
-
-    private static boolean isReadOnly(MaidControlIntent intent) {
-        return intent instanceof MaidControlIntent.QueryStatus
-                || intent instanceof MaidControlIntent.QueryInventory;
     }
 
     private static Component status(AiPartnerEntity partner) {

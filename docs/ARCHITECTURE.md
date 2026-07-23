@@ -1,192 +1,267 @@
-# AI Partner 现行架构
+# AI Partner 0.11 架构
 
-本文是代码清理后的权威架构说明。历史实验协议、离线评测器和版本路线文档不属于现行产品运行时；如与旧提交记录冲突，以本文件和当前代码为准。
+本文描述 Minecraft 26.1.2 对应的当前实现。旧的远程模型驱动和 `Goal` 女仆自主 AI 已删除，不再属于运行时架构。
 
 ## 1. 设计边界
 
-项目遵循四条核心约束：
+项目把行为分成两类：
 
-1. **服务器权威**：客户端、命令、本地解析器和模型都只能提出类型化意图，不能直接修改世界；
-2. **单一语义入口**：所有玩家可触发的女仆能力最终进入 `MaidActionRegistry`；
-3. **执行与叙述分离**：LLM 可以生成回应和计划，但成功/失败只能来自服务器回执；
-4. **有界并可恢复**：任务、工作流、搜索、导航、重试、超时和持久化字段都有明确上限。
+1. **自主生物 AI**：跟随、待命、回家、日程移动、休息、注视、游泳和战斗仲裁，由原版风格 `Brain` 驱动；
+2. **有限世界任务**：采集、存箱、制作、持续工作等需要精确进度和物品守恒的动作，由服务端状态机执行。
+
+Brain 负责“现在应该做什么”和“应该向哪里移动”；有限任务负责“这个有副作用的步骤是否真正完成”。两者通过瞬时记忆互斥，避免同时写导航。
+
+## 2. 总体数据流
 
 ```mermaid
 flowchart TD
-    Client["R 键对话 / 女仆 GUI"] --> Network["受限网络载荷"]
-    Command["/maid 命令"] --> Intent["MaidControlIntent"]
-    Network --> Intent
-    Local["LocalMaidIntentParser"] --> Intent
-    Model["MaidControlLlmGateway"] --> Codec["v3 严格 JSON codec"]
-    Codec --> Plan["MaidWorkflowSpec: 1..6 步"]
-    Plan --> Workflow["MaidWorkflowRuntime"]
-    Workflow --> Registry["MaidActionRegistry"]
-    Intent --> Registry
-    Registry --> Contract["ContractCompiler / 动作 IBC"]
-    Contract --> Task["MaidTaskRuntime"]
-    Registry --> Controllers["生活 / 工作 / 战斗 / 查询"]
-    Task --> Entity["AiPartnerEntity"]
-    Controllers --> Entity
-    Entity --> Receipt["状态、物品增量、失败码"]
-    Receipt --> Workflow
+    Input["命令 / GUI / 本地规则对话"] --> Intent["MaidControlIntent"]
+    Intent --> Service["MaidControlService"]
+    Service --> Registry["MaidActionRegistry"]
+    Registry --> State["手动指令 / TaskContract / 生活与工作状态"]
+
+    State --> StateSensor["MaidStateSensor，1 tick"]
+    Hurt["受击与附近实体"] --> VanillaSensors["HURT_BY / NEAREST_LIVING_ENTITIES"]
+    StateSensor --> Brain["Brain 记忆"]
+    VanillaSensors --> ThreatSensor["MaidThreatSensor，5 tick"]
+    ThreatSensor --> Brain
+
+    Brain --> Activities["CORE + FIGHT / WORK / REST / IDLE"]
+    Activities --> Behaviors["Behavior / OneShot / RunOne"]
+    Behaviors --> Targets["LOOK_TARGET / WALK_TARGET / ATTACK_TARGET"]
+    Targets --> Sinks["原版 LookAtTargetSink / MoveToTargetSink"]
+    Sinks --> Navigation["AiPartnerPathNavigation / PathFinder"]
+
+    State --> TaskRuntime["MaidTaskRuntime"]
+    TaskRuntime --> TaskMarker["TASK_CONTROLLED"]
+    TaskMarker --> Brain
+    TaskRuntime --> WorldActions["受约束的方块、物品、容器动作"]
 ```
 
-## 2. 启动与端划分
+不存在客户端直接控制实体或世界的通道。客户端只提交意图；主人、实体、维度、参数和运行时状态始终由服务器复验。
 
-`AiPartnerMod` 是通用/服务端入口，注册实体、菜单、皮肤网络、对话网络、工作流事件桥和 `/maid` 命令；服务器停止时取消仍在途的模型请求。
+## 3. Brain 生命周期
 
-`AiPartnerClient` 注册渲染器、GUI、R 键对话和 `/maid-skin` 客户端命令。客户端只提交枚举、字符串、UUID 或图片字节等受限输入；权限、目标实体和数据格式均在服务器复验。
+`AiPartnerEntity` 覆盖三个关键点：
 
-Mixin 只服务于缺少公开访问面的原版能力：熔炉内部字段、经验球修补、钓鱼浮标状态及渲染。`ai-partner.mixins.json` 是这些类的注册入口。
+- `makeBrain(Brain.Packed)`：通过 `MaidAi.brainProvider()` 创建或恢复 Brain；
+- `getBrain()`：向女仆传感器和行为提供精确泛型；
+- `customServerAiStep(ServerLevel)`：推进 Brain、选择 Activity，再执行父类服务端 AI。
 
-## 3. 语义控制面
-
-### 3.1 意图模型
-
-`MaidControlIntent` 是 sealed 接口，覆盖：
-
-- `RunTask(JobSpec)`；
-- 工作模式、日程、战斗策略；
-- 回家、活动地点、回家范围约束和活动半径；
-- 改名；
-- 状态查询、背包查询和背包取回。
-
-它不允许携带任意命令、世界坐标、NBT、脚本或逐 tick 操作。`JobSpec` 仍是有限任务的内部参数对象，不再是 LLM 协议边界。
-
-### 3.2 动作注册表
-
-`MaidActionRegistry` 为每个意图声明：
-
-- 公共前置条件：女仆存活、执行者为主人、同维度、参数在界内；
-- 目标谓词：状态已观察、查询已产生、物品已转移或任务契约已接受；
-- 公共不变量：执行后主人和维度关系仍成立；
-- 完成形态：即时完成或等待任务契约。
-
-注册表先验证、再执行、最后复验后置条件。直接变更会中断旧工作流；状态和背包查询是只读操作，不会中断。GUI 会先把“循环下一个值”转换为明确目标值再进入注册表，因此协议不依赖按钮编号。
-
-### 3.3 输入驱动
-
-- `/maid` 明确子命令直接构造类型化意图；兜底的 `/maid <message>` 进入对话服务；
-- `LOCAL` 使用中英文规则解析器，单次产生一个意图、澄清、拒绝或社交回应；
-- `LLM` 使用 OpenAI-compatible Chat Completions，输出必须通过协议 `3.0` Schema、严格 codec 和请求阶段形状检查；
-- `@名称` 或 UUID 前缀只改变本条消息的目标解析，不修改持久化选择；
-- 紧急取消始终先由本地解析器识别。
-
-## 4. 有限任务与 IBC
-
-### 4.1 编译阶段
-
-`ContractCompiler` 通过 `TaskDefinitionRegistry` 和 `TaskContractValidatorRegistry` 查找任务定义与验证器。验证器检查目标白名单、数量、半径、工具、背包容量、容器及世界规则，返回接受或带 `FailureCode` 的拒绝。
-
-接受后的 `TaskContract` 保存：
-
-- UUID、`JobSpec`、状态和类型化失败码；
-- 前置条件、目标谓词和运行时不变量文本；
-- 最大本地恢复次数与任务超时；
-- 接受者 UUID、维度和固定执行原点。
-
-单任务契约不管理 LLM 重规划；该预算只存在于工作流层。
-
-### 4.2 执行阶段
-
-`MaidTaskRuntime` 保证每个女仆最多只有一个活动契约。`FOLLOW` / `STAY` 被转换为长期 `ManualDirective`；`CANCEL` 原子取消当前活动；其余任务从 `MaidTaskRegistry` 创建执行器适配器。
-
-当前有限任务：
-
-| 任务 | 执行方式 | 完成证据 |
-|---|---|---|
-| `COLLECT_BLOCK` | 搜索、导航、复验、破坏、拾取 | 指定物品的真实背包增量 |
-| `DEPOSIT_ITEM` | 搜索普通单箱、导航、复验、精确转移 | 实际存入数量 |
-| `TRANSFER_ITEM` | 复用安全存箱执行器 | 实际存入指定物品数量 |
-| `COLLECT_AND_DEPOSIT` | 固定采集后存箱的两阶段组合 | 两段证据均满足 |
-
-运行时每 tick 复验主人、维度、执行原点半径、`mobGriefing` 和任务专属边界。恢复预算始终启用；任何旧存档中的实验开关都不能关闭监控或恢复。执行器回调只有在独立目标谓词检查通过后才可把契约标为 `COMPLETED`。
-
-任务快照使用版本化 `MaidTaskSnapshot`。当前格式写入稳定阶段、剩余超时及必要进度；加载失败、未知格式或不一致状态时失败关闭。
-
-## 5. LLM 对话与工作流
-
-模型根对象只允许 `schema_version`、`dialogue_act`、`plan`、`response_text`。可用对话行为是 `PROPOSE_PLAN`、`ASK_CLARIFICATION`、`REJECT_UNSUPPORTED` 和 `SOCIAL_REPLY`；模型不能使用本地解析器专用的 `PROPOSE_INTENT`。
-
-`MaidWorkflowSpec` 的硬边界：
-
-- 1～6 个已注册语义动作；
-- 最多一次重规划；
-- 总期限最多 600 秒；
-- `FOLLOW`、`STAY` 和 `RETURN_HOME` 等持续移动指令只能位于末步。
-
-`MaidWorkflowRuntime` 串行派发步骤。即时动作必须拿到已复验回执；有限任务必须等待关联 `TaskContract` 的权威终态。失败重规划不能删除、改变或重排尚未完成的原目标，只能增加准备动作。计划耗尽但仍有待完成目标时，以 `CONTRACT_VIOLATION` 失败。
-
-工作流持久化 UUID、主人、来源、原请求、步骤、待完成目标、游标、期限、预算、活动任务 UUID 和有界证据。完成/失败事件经 `MaidDomainEvents` 交给对话服务生成结果约束叙述；网关不可用时使用确定性真实结果文本。
-
-注意：当前 `RETURN_HOME` 的即时后置条件是“回家指令已激活”，不是“已经到达”。因此它只能作为计划末步，但终态叙述仍需避免把指令接收误写成实际抵达。
-
-## 6. 实体聚合与行为调度
-
-`AiPartnerEntity` 是 Minecraft 实体外壳和控制器聚合根，负责同步数据、交互、存档及公开委托 API。每 tick 的主要调用顺序为：
-
-1. `MaidCombatController`；
-2. `MaidTaskRuntime`；
-3. `MaidWorkflowRuntime`；
-4. `MaidLifeController`；
-5. `MaidWorkController`；
-6. `MaidPickupController`。
-
-`MaidBehaviorController` 将手动指令、有限任务、日程背景和临时战斗中断投影为单一客户端模式。GUI 打开与战斗中断只暂停活动任务，不销毁契约；战斗结束后任务重新通过运行时不变量再继续。
-
-### 6.1 生活与日程
-
-`MaidLifeController` 管理日班、夜班、全天日程，工作/休闲/睡眠地点，活动半径和回家约束。回家、休息和睡眠不传送；睡眠恢复、受伤唤醒和无床休息均由服务端推进。
-
-### 6.2 持续工作
-
-`MaidWorkController` 使用 `MaidWorkRegistry` 注册的 17 种规则，以有界“搜索—导航—复验—动作—冷却”状态机推进。`MaidWorkSupplyController` 独立处理个人 2×2 制作、工作台搜索、制作/放置工作台和 3×3 制作。
-
-复杂规则另外包含：自然树计划与结构保护、安全暴露矿石检查、熔炉批次守恒和租约、真实钓鱼浮标与岸线几何。规则只声明目标和需求；世界修改由 `core.action` 中的公共动作执行。
-
-### 6.3 战斗、拾取与成长
-
-战斗控制器过滤主人、玩家、同主女仆和友方宠物，按距离和装备选择近战或弓箭。拾取控制器处理一般物品、箭和经验球，并按原版修补公式维修装备。成长数据与成长控制器管理经验、好感、奖励限额和温和属性增益。
-
-## 7. 背包、制作与皮肤
-
-物品布局为原生主手 + 35 格储物，另有原生护甲和副手。`EquipmentLease` 在任务/工作期间借用工具并确保归还；制作使用影子背包预演，只有原料、剩余物和输出空间全部成立时才原子提交。
-
-`MaidInventoryPersistence` 写入当前固定槽位布局，并保留旧压缩背包的只读迁移。迁移冲突不会复制或静默丢弃物品，无法容纳的物品会在实体加载后显式掉落。
-
-皮肤上传经过客户端预检、服务器尺寸/格式校验、去元数据重编码和内容哈希存储。存档只保存皮肤哈希，不保存任意客户端路径。
-
-## 8. 持久化边界
-
-当前实体数据版本为 `7`。新存档写入：
-
-- 当前行为指令、任务契约、执行锚点、恢复计数和任务快照；
-- 工作流计划、待完成目标、游标、期限、预算和证据；
-- 背包、生活地点/日程、工作、战斗、成长和对话记忆；
-- 皮肤哈希和逐女仆驱动模式；API Key 环境变量名只存在于服务端全局配置。
-
-新格式不再写出历史混合模式、旧任务快照、旧成长时间戳、实验变体或可关闭安全检查的字段。为防止旧世界物品或任务丢失，代码仍保留有限的只读迁移器；未知的新格式一律失败关闭。
-
-## 9. 测试边界
-
-JUnit 测试覆盖：命令参数、注册表完整性、协议 Schema/codec 差分、计划边界、重规划义务、对话记忆、契约与任务快照往返、恢复预算、背包迁移、制作、日程、成长、皮肤、端点策略以及复杂工作纯逻辑。
-
-尚未自动覆盖的是 Minecraft 集成层：真实路径查找、区块加载/卸载、多人竞争、实体死亡与卸载、长时间工作、跨重启世界行为、GUI 像素布局和网络异常。发布前必须补充 Fabric GameTest 或等价的可重复世界内测试，并保留少量开发客户端冒烟验收。
-
-## 10. 依赖方向
-
-推荐保持以下方向，避免再次形成双运行时：
+每个服务端 tick 的顺序是：
 
 ```text
-client / command / parser / llm
-                ↓
-       control + workflow
-                ↓
-      contract + core.task
-                ↓
-entity controllers + core.action
-                ↓
-        Minecraft server API
+AiPartnerEntity.customServerAiStep
+  ├─ Brain.tick
+  │    ├─ 遗忘过期记忆
+  │    ├─ tick 传感器
+  │    ├─ 启动当前 Activity 中未运行的行为
+  │    └─ tick 或停止运行中的行为
+  ├─ MaidAi.updateActivity
+  └─ super.customServerAiStep
 ```
 
-研究评测、数据分析和一次性场景脚本不应重新进入生产源集。若未来重建实验，应作为独立模块或外部仓库，只消费稳定的领域事件和产物，不反向控制玩法安全策略。
+Activity 在 Brain tick 后依据最新记忆更新，因此传感器刚写入的高优先级状态会在下一个 tick 启动对应行为。这与原版多个 Brain 生物的组织方式一致，也避免在同一次行为遍历中修改活动集合。
+
+## 4. 记忆模型
+
+### 4.1 女仆专用瞬时记忆
+
+| 记忆 | 类型 | 主要生产者 | 主要消费者 |
+|---|---|---|---|
+| `FOLLOW_OWNER` | `Unit` | `MaidStateSensor` | 跟随行为 |
+| `STAY_IN_PLACE` | `Unit` | `MaidStateSensor` | 待命行为 |
+| `PAUSED` | `Unit` | `MaidStateSensor` | CORE 暂停、所有自主行为 |
+| `TASK_CONTROLLED` | `Unit` | `MaidStateSensor` | 自主移动入口条件 |
+| `AMBIENT_MOVEMENT` | `Unit` | `MaidStateSensor` | `RunOne` 空闲行为 |
+| `SCHEDULE_WORK` | `Unit` | `MaidStateSensor` | `WORK` Activity 条件 |
+| `SCHEDULE_REST` | `Unit` | `MaidStateSensor` | `REST` Activity 条件 |
+| `ACTIVITY_TARGET` | `GlobalPos` | `MaidStateSensor` | 回家、日程地点行为 |
+
+这些 `MemoryModuleType` 都没有 Codec，不写入 NBT。加载实体后，传感器会从手动指令、任务、生活日程和 GUI 状态重新构造它们。
+
+### 4.2 使用的原版记忆
+
+- `HURT_BY`、`HURT_BY_ENTITY`：记录受击上下文；
+- `NEAREST_LIVING_ENTITIES`、`NEAREST_VISIBLE_LIVING_ENTITIES`：视野和附近实体；
+- `ATTACK_TARGET`：当前合法战斗目标；
+- `ATTACK_COOLING_DOWN`：近战或远程攻击冷却；
+- `LOOK_TARGET`：注视目标；
+- `WALK_TARGET`：高层移动意图；
+- `PATH`：`MoveToTargetSink` 当前路径；
+- `CANT_REACH_WALK_TARGET_SINCE`：首次确认目标不可达的游戏时间。
+
+`MaidStateSensor` 比较上一个 tick 的指令、日程、暂停、任务和活动地点状态。在控制权切换时，它会清除 `WALK_TARGET`、`LOOK_TARGET` 和不可达计时，防止旧路径穿透到新状态。
+
+## 5. 传感器
+
+### `MaidStateSensor`
+
+扫描周期为 1 tick。它把权威控制器状态投影成 Brain 记忆：
+
+- 背包 GUI 打开 → `PAUSED`；
+- 有限任务运行 → `TASK_CONTROLLED`；
+- 跟随/待命指令 → 对应 marker；
+- 日程工作/睡眠 → `SCHEDULE_WORK` / `SCHEDULE_REST`；
+- 回家、工作、休闲或床位置 → `ACTIVITY_TARGET`；
+- 允许普通闲逛 → `AMBIENT_MOVEMENT`。
+
+GUI 暂停和待命会同时停止现有导航。有限任务只清理自主移动记忆，不持续调用 `navigation.stop()`，这样任务状态机可以在接管后的下一 tick 使用自己的受约束导航。
+
+### `MaidThreatSensor`
+
+扫描周期为 5 tick。它只接受自身受击、主人受击或主人正在攻击的合法敌对实体，不主动把中立生物变成目标。
+
+目标复验包括：
+
+- 战斗策略未关闭；
+- 实体存活、同维度且距离不超过 24 格；
+- 不是玩家、主人、自己或同阵营实体；
+- 符合待命锚点或活动地点边界；
+- `canAttack` 和原版阵营规则允许。
+
+## 6. Activity 与行为
+
+### CORE
+
+始终激活，依次包含：
+
+1. GUI 暂停清理；
+2. `Swim`；
+3. `LookAtTargetSink`；
+4. `MoveToTargetSink`；
+5. `InteractWithDoor`。
+
+高层行为不直接反复调用 `navigation.moveTo`，而是写入目标记忆，由 CORE 汇接器统一推进。
+
+### FIGHT
+
+条件：`ATTACK_TARGET` 存在且没有 `PAUSED`。
+
+行为：
+
+1. 验证目标和 200 tick 不可达超时；
+2. 写入追击或保持距离目标；
+3. 在可见、持弓、有箭和冷却结束时远程攻击；
+4. 在可见、近战范围内和冷却结束时近战攻击。
+
+退出时清理移动、注视、不可达和攻击冷却记忆。进入 FIGHT 的第一刻也会停止旧的跟随或日程路径。武器通过 `EquipmentLease` 临时借用并在单次攻击后归还。
+
+### WORK
+
+条件：`SCHEDULE_WORK` 存在且没有 `PAUSED`。先前往工作地点；没有正在执行的工作且允许活动时，可以注视或闲逛。真正的种植、采矿、熔炼等世界动作仍由工作控制器执行。
+
+### REST
+
+条件：`SCHEDULE_REST` 存在且没有 `PAUSED`。前往睡眠地点或床，并在无移动目标时进入休息。床占用、受击冷却和恢复由生活控制器复验。
+
+### IDLE
+
+无额外条件，是默认活动。它承载：
+
+- 跟随主人；
+- 原地待命；
+- 回家或休闲地点移动；
+- 随机注视；
+- 受 marker 控制的 `RandomStroll` / `SetWalkTargetFromLookTarget` / `DoNothing`。
+
+Activity 选择顺序固定为：
+
+```text
+FIGHT → WORK → REST → IDLE
+```
+
+`CORE` 与选中的一个非核心 Activity 同时运行。
+
+## 7. 寻路与不可达处理
+
+移动链路是：
+
+```text
+Behavior
+  → WALK_TARGET
+  → MoveToTargetSink.tryComputePath
+  → PathNavigation.createPath
+  → PathFinder / NodeEvaluator
+  → PATH 记忆
+  → navigation.moveTo
+```
+
+原版 `MoveToTargetSink` 会：
+
+- 读取目标、速度和允许接近距离；
+- 为移动目标在位置变化超过 2 格后重算路径；
+- 路径不能真正到达时设置 `CANT_REACH_WALK_TARGET_SINCE`；
+- 无完整路径时尝试朝目标的局部随机中间点；
+- 卡住后停止路径，并使用最多 40 tick 的随机重试冷却；
+- 默认行为超时范围为 150–250 tick。
+
+女仆跟随在此基础上增加：
+
+- 超过 5 格开始追随，进入 3 格内停止，避免边界抖动；
+- 超过 10 格使用更高速度；
+- 至少 12 格且不可达持续 60 tick 后，调用驯服生物的原版安全主人传送；
+- 传送失败按契约恢复预算计数；
+- 不可达持续 200 tick 时以 `PATH_UNREACHABLE` 结束有限契约。
+
+战斗、回家、工作、休闲和睡眠不会传送。
+
+## 8. 有限任务与 Brain 的控制权
+
+`MaidTaskRuntime` 仍管理 `TaskContract`、进度、恢复预算、超时和存档恢复。有限任务可能直接使用导航或执行方块、物品、容器动作，因为这些动作必须拥有确定的阶段和完成证据。
+
+控制权规则如下：
+
+```text
+GUI PAUSED
+  > FIGHT 临时中断
+  > TASK_CONTROLLED 有限任务
+  > 手动 FOLLOW / STAY / RETURN_HOME
+  > 日程 WORK / REST
+  > IDLE
+```
+
+战斗只临时覆盖显示和移动，不销毁被中断的有限任务或长期指令。目标消失后，Brain 清理 FIGHT 记忆并恢复原状态。
+
+## 9. 本地对话
+
+R 键界面只发送玩家输入、回退目标女仆 UUID 和长度受限的文本到服务端。服务端流程是：
+
+```text
+MaidConversationTargetResolver
+  → LocalMaidIntentParser
+  → MaidControlInterpretation
+  → MaidControlService
+  → MaidActionRegistry
+```
+
+解析器一次只产生一个类型化意图。无法确定时保留两分钟澄清上下文；不受支持的请求明确拒绝。代码中没有 HTTP 客户端、端点、模型、API Key 或远程响应处理路径。
+
+## 10. 注册、持久化与兼容
+
+模组初始化顺序先注册记忆模块和传感器，再注册实体。Brain Provider 会自动注册所有传感器和行为要求的原版记忆。
+
+实体 NBT 保存：
+
+- 驯服与主人关系；
+- 背包、装备和安全迁移数据；
+- 有限任务契约与快照；
+- 手动指令、生活地点、日程和工作模式；
+- 战斗策略、成长、好感、皮肤和显示状态。
+
+Brain 瞬时 marker 不保存。旧版本多余字段会被忽略；物品和任务安全所需的旧格式只读迁移仍保留。
+
+## 11. 关键源码入口
+
+- `entity/AiPartnerEntity.java`
+- `entity/ai/MaidAi.java`
+- `entity/ai/MaidMovementBehaviors.java`
+- `entity/ai/MaidCombatBehaviors.java`
+- `entity/ai/sensing/MaidStateSensor.java`
+- `entity/ai/sensing/MaidThreatSensor.java`
+- `registry/ModMemoryModules.java`
+- `registry/ModSensorTypes.java`
+- `core/task/MaidTaskRuntime.java`
+- `life/MaidLifeController.java`
+- `combat/MaidCombatController.java`
+- `conversation/MaidConversationService.java`

@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "package": "io.github.ozozorz.aipartner.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "mixins": [
+    "AbstractFurnaceBlockEntityAccessor",
+    "ExperienceOrbAccessor",
+    "FishingHookAccessor",
+    "FishingHookMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

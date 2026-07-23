@@ -1,7 +1,7 @@
 package io.github.ozozorz.aipartner.core.schedule;
 
 /**
- * 集中定义一天中的日间、过渡和夜间边界，避免时间常量散落在 Goal 中。
+ * 集中定义一天中的日间、过渡和夜间边界，避免时间常量散落在活动行为中。
  */
 public record ScheduleWindows(
         int dayStart,

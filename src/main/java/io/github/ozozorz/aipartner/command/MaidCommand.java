@@ -11,7 +11,6 @@ import io.github.ozozorz.aipartner.contract.JobSpec;
 import io.github.ozozorz.aipartner.combat.CombatPolicy;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
 import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
-import io.github.ozozorz.aipartner.control.MaidDriveMode;
 import io.github.ozozorz.aipartner.control.MaidControlDecision;
 import io.github.ozozorz.aipartner.control.MaidControlIntent;
 import io.github.ozozorz.aipartner.control.MaidControlService;
@@ -22,7 +21,6 @@ import io.github.ozozorz.aipartner.job.ContainerTargets;
 import io.github.ozozorz.aipartner.life.ActivityLocationType;
 import io.github.ozozorz.aipartner.service.PartnerService;
 import io.github.ozozorz.aipartner.work.MaidWorkMode;
-import java.util.UUID;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -102,7 +100,6 @@ public final class MaidCommand {
                                                 builder
                                         ))
                                         .executes(MaidCommand::setCombatPolicy)))
-                        .then(createDriverCommand())
                         .then(Commands.literal("follow").executes(context -> runBasicJob(context, JobType.FOLLOW)))
                         .then(Commands.literal("stay").executes(context -> runBasicJob(context, JobType.STAY)))
                         .then(Commands.literal("cancel").executes(context -> runBasicJob(context, JobType.CANCEL)))
@@ -192,84 +189,6 @@ public final class MaidCommand {
             boolean set
     ) {
         return Commands.literal(literal).executes(context -> configureLocation(context, type, set));
-    }
-
-    /** Builds the per-maid LOCAL/LLM mode command; credentials remain server-configured. */
-    private static LiteralArgumentBuilder<CommandSourceStack> createDriverCommand() {
-        return Commands.literal("driver")
-                .executes(MaidCommand::showDriverSettings)
-                .then(Commands.literal("mode")
-                        .then(Commands.argument("driver-mode", StringArgumentType.word())
-                                .suggests((context, builder) -> SharedSuggestionProvider.suggest(
-                                        java.util.Arrays.stream(MaidDriveMode.values())
-                                                .map(MaidDriveMode::serializedName),
-                                        builder
-                                ))
-                                .executes(MaidCommand::setDriverMode)))
-                .then(Commands.literal("clear-memory").executes(MaidCommand::clearConversationMemory));
-    }
-
-    private static int showDriverSettings(
-            CommandContext<CommandSourceStack> context
-    ) throws CommandSyntaxException {
-        ServerPlayer player = context.getSource().getPlayerOrException();
-        AiPartnerEntity partner = requirePartner(context, player);
-        if (partner == null) {
-            return 0;
-        }
-        String readinessError = io.github.ozozorz.aipartner.llm.MaidControlLlmGateway
-                .getInstance()
-                .readinessError(partner.getLlmApiKeyEnvironmentVariable());
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "message.ai-partner.driver.status",
-                partner.getName(),
-                partner.getDriveMode().serializedName(),
-                partner.getLlmApiKeyEnvironmentVariable(),
-                readinessError == null ? "READY" : readinessError
-        ), false);
-        return 1;
-    }
-
-    private static int setDriverMode(
-            CommandContext<CommandSourceStack> context
-    ) throws CommandSyntaxException {
-        ServerPlayer player = context.getSource().getPlayerOrException();
-        AiPartnerEntity partner = requirePartner(context, player);
-        if (partner == null) {
-            return 0;
-        }
-        String rawMode = StringArgumentType.getString(context, "driver-mode");
-        MaidDriveMode mode = MaidDriveMode.parse(rawMode).orElse(null);
-        if (mode == null) {
-            context.getSource().sendFailure(Component.translatable("message.ai-partner.driver.invalid_mode", rawMode));
-            return 0;
-        }
-        partner.setDriveMode(mode);
-        MaidConversationService.cancelPending(player.getUUID());
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "message.ai-partner.driver.mode_set",
-                partner.getName(),
-                mode.serializedName()
-        ), false);
-        return 1;
-    }
-
-    /** Clears bounded dialogue history after cancelling responses that could append stale text. */
-    private static int clearConversationMemory(
-            CommandContext<CommandSourceStack> context
-    ) throws CommandSyntaxException {
-        ServerPlayer player = context.getSource().getPlayerOrException();
-        AiPartnerEntity partner = requirePartner(context, player);
-        if (partner == null) {
-            return 0;
-        }
-        MaidConversationService.cancelPending(player.getUUID());
-        partner.conversationMemory().clear();
-        context.getSource().sendSuccess(
-                () -> Component.translatable("message.ai-partner.driver.memory_cleared", partner.getName()),
-                false
-        );
-        return 1;
     }
 
     private static int showHelp(CommandContext<CommandSourceStack> context) {
@@ -537,7 +456,6 @@ public final class MaidCommand {
     }
 
     private static int runBasicJob(CommandContext<CommandSourceStack> context, JobType type) throws CommandSyntaxException {
-        cancelPendingRequest(context.getSource().getPlayerOrException().getUUID());
         return compileAndRun(context, JobSpec.basic(type), type.name().toLowerCase());
     }
 
@@ -545,7 +463,6 @@ public final class MaidCommand {
             CommandContext<CommandSourceStack> context,
             int radius
     ) throws CommandSyntaxException {
-        cancelPendingRequest(context.getSource().getPlayerOrException().getUUID());
         String block = IdentifierArgument.getId(context, "block").toString();
         int quantity = IntegerArgumentType.getInteger(context, "quantity");
         return compileAndRun(
@@ -559,7 +476,6 @@ public final class MaidCommand {
             CommandContext<CommandSourceStack> context,
             int radius
     ) throws CommandSyntaxException {
-        cancelPendingRequest(context.getSource().getPlayerOrException().getUUID());
         String item = IdentifierArgument.getId(context, "item").toString();
         int quantity = IntegerArgumentType.getInteger(context, "quantity");
         return compileAndRun(
@@ -574,7 +490,6 @@ public final class MaidCommand {
             CommandContext<CommandSourceStack> context,
             int radius
     ) throws CommandSyntaxException {
-        cancelPendingRequest(context.getSource().getPlayerOrException().getUUID());
         String item = IdentifierArgument.getId(context, "item").toString();
         int quantity = IntegerArgumentType.getInteger(context, "quantity");
         return compileAndRun(
@@ -588,7 +503,6 @@ public final class MaidCommand {
             CommandContext<CommandSourceStack> context,
             int radius
     ) throws CommandSyntaxException {
-        cancelPendingRequest(context.getSource().getPlayerOrException().getUUID());
         String block = IdentifierArgument.getId(context, "block").toString();
         int quantity = IntegerArgumentType.getInteger(context, "quantity");
         return compileAndRun(
@@ -625,7 +539,7 @@ public final class MaidCommand {
         );
     }
 
-    /** Sends every command capability through the same semantic action entry as UI and LLM plans. */
+    /** Sends every command capability through the same semantic action entry as the local dialogue UI. */
     private static int executeControl(
             CommandContext<CommandSourceStack> context,
             AiPartnerEntity partner,
@@ -648,7 +562,4 @@ public final class MaidCommand {
         return 1;
     }
 
-    private static void cancelPendingRequest(UUID playerId) {
-        MaidConversationService.cancelPending(playerId);
-    }
 }

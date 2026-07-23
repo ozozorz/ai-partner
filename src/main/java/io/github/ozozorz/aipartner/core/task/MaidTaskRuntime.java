@@ -93,9 +93,7 @@ public final class MaidTaskRuntime {
                 return;
             }
         }
-        if (!isConversationalWorkflow()) {
-            partner.showSpeechBubble(feedbackFor(contract.job().type()));
-        }
+        partner.showSpeechBubble(feedbackFor(contract.job().type()));
     }
 
     private void executeCancelContract(
@@ -112,9 +110,7 @@ public final class MaidTaskRuntime {
         behaviorController.clearActivity();
         partner.getNavigation().stop();
         cancelContract.markCompleted();
-        if (!isConversationalWorkflow()) {
-            partner.showSpeechBubble(feedbackFor(JobType.CANCEL));
-        }
+        partner.showSpeechBubble(feedbackFor(JobType.CANCEL));
     }
 
     private void activateDirective(ManualDirective directive) {
@@ -218,10 +214,8 @@ public final class MaidTaskRuntime {
         stopActiveTask();
         behaviorController.clearActivity();
         partner.getNavigation().stop();
-        if (!isConversationalWorkflow()) {
-            notifyOwner(Component.translatable("message.ai-partner.failed", failureCode.name()));
-            partner.showSpeechBubble(Component.translatable("bubble.ai-partner.task_failed"));
-        }
+        notifyOwner(Component.translatable("message.ai-partner.failed", failureCode.name()));
+        partner.showSpeechBubble(Component.translatable("bubble.ai-partner.task_failed"));
     }
 
     /**
@@ -240,18 +234,16 @@ public final class MaidTaskRuntime {
         stopActiveTask();
         behaviorController.clearActivity();
         partner.getNavigation().stop();
-        if (!isConversationalWorkflow()) {
-            notifyOwner(Component.translatable(
-                    "message.ai-partner.completed",
-                    completedContract.job().type().name(),
-                    completedContract.job().quantity(),
-                    completedContract.job().target()
-            ));
-            partner.showSpeechBubble(Component.translatable("bubble.ai-partner.task_completed"));
-        }
+        notifyOwner(Component.translatable(
+                "message.ai-partner.completed",
+                completedContract.job().type().name(),
+                completedContract.job().quantity(),
+                completedContract.job().target()
+        ));
+        partner.showSpeechBubble(Component.translatable("bubble.ai-partner.task_completed"));
     }
 
-    /** Cancels the current contract for workflow, command, or lifecycle callers. */
+    /** Cancels the current contract for commands, menus, or lifecycle callers. */
     public void cancel(@Nullable ServerPlayer actor, String reason) {
         cancelExisting(actor, reason);
     }
@@ -642,10 +634,6 @@ public final class MaidTaskRuntime {
         if (partner.getOwner() instanceof ServerPlayer serverPlayer) {
             serverPlayer.sendSystemMessage(message);
         }
-    }
-
-    private boolean isConversationalWorkflow() {
-        return sourceId.startsWith("LLM") && sourceId.contains("WORKFLOW");
     }
 
     private static String normalizeSourceId(String sourceId) {

@@ -2,19 +2,18 @@ package io.github.ozozorz.aipartner;
 
 import io.github.ozozorz.aipartner.command.MaidCommand;
 import io.github.ozozorz.aipartner.conversation.MaidConversationNetworking;
-import io.github.ozozorz.aipartner.conversation.MaidConversationService;
-import io.github.ozozorz.aipartner.llm.MaidControlLlmGateway;
 import io.github.ozozorz.aipartner.registry.ModEntities;
+import io.github.ozozorz.aipartner.registry.ModMemoryModules;
 import io.github.ozozorz.aipartner.registry.ModMenus;
+import io.github.ozozorz.aipartner.registry.ModSensorTypes;
 import io.github.ozozorz.aipartner.skin.MaidSkinNetworking;
 import net.fabricmc.api.ModInitializer;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * AI Partner 的服务端与通用入口，负责注册实体和命令。
+ * AI Partner 的通用入口，负责注册实体、Brain 组件、网络与命令。
  */
 public final class AiPartnerMod implements ModInitializer {
     public static final String MOD_ID = "ai-partner";
@@ -22,21 +21,18 @@ public final class AiPartnerMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        ModMemoryModules.register();
+        ModSensorTypes.register();
         ModEntities.register();
         ModMenus.register();
         MaidSkinNetworking.registerServer();
         MaidConversationNetworking.registerServer();
-        MaidConversationService.register();
         MaidCommand.register();
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> MaidConversationService.cancelAll());
-        LOGGER.info(
-                "AI Partner initialized for Minecraft 26.1.2; gameplay LLM model={} (driver mode is per maid; credentials are server-owned)",
-                MaidControlLlmGateway.getInstance().model()
-        );
+        LOGGER.info("AI Partner initialized for Minecraft 26.1.2 with local dialogue and Brain-based maid AI");
     }
 
     /**
-     * 创建模组命名空间下的资源标识。
+     * 创建模块命名空间下的资源标识。
      *
      * @param path 资源路径
      * @return 完整资源标识

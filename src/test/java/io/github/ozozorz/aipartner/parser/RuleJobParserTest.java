@@ -8,7 +8,7 @@ import io.github.ozozorz.aipartner.job.JobType;
 import org.junit.jupiter.api.Test;
 
 /**
- * 验证无 LLM 时规则基线的稳定中文与英文映射。
+ * 验证本地规则基线的稳定中文与英文映射。
  */
 class RuleJobParserTest {
     @Test

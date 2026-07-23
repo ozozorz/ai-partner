@@ -268,7 +268,7 @@ public final class TaskContract {
         return failureCode;
     }
 
-    /** 契约执行器的有限本地重试与超时边界；工作流重规划由 MaidWorkflowRuntime 独立管理。 */
+    /** 契约执行器使用的有限本地重试与超时边界。 */
     public record FailurePolicy(int maxLocalRetries, int timeoutSeconds) {
         public static final FailurePolicy DEFAULT = new FailurePolicy(2, 90);
 

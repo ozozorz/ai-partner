@@ -1,10 +1,7 @@
 package io.github.ozozorz.aipartner.client.screen;
 
-import io.github.ozozorz.aipartner.control.MaidDriveMode;
 import io.github.ozozorz.aipartner.conversation.MaidConversationScreenPayload;
 import io.github.ozozorz.aipartner.conversation.MaidDialogueSubmitPayload;
-import io.github.ozozorz.aipartner.conversation.MaidDriverSettingsPayload;
-import java.util.Locale;
 import java.util.UUID;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -14,43 +11,36 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 
-/** Dedicated natural-language screen with per-maid mode and server-owned credential status. */
+/**
+ * 只使用本地规则解析的自然语言输入界面。
+ */
 public final class MaidConversationScreen extends Screen {
     private static final int PANEL_WIDTH = 360;
-    private static final int PANEL_HEIGHT = 196;
+    private static final int PANEL_HEIGHT = 132;
     private static final int PANEL_COLOR = 0xE6202630;
     private static final int PANEL_BORDER = 0xFF75839A;
     private static final int LABEL_COLOR = 0xFFF0F3F8;
     private static final int MUTED_COLOR = 0xFFB5BECC;
     private MaidConversationScreenPayload data;
-    private MaidDriveMode selectedMode;
-    private EditBox environmentVariableBox;
     private EditBox messageBox;
-    private Button modeButton;
-    private Button saveButton;
     private Button sendButton;
 
     public MaidConversationScreen(MaidConversationScreenPayload data) {
         super(Component.translatable("gui.ai-partner.dialogue.title"));
         this.data = data;
-        this.selectedMode = MaidDriveMode.fromSavedName(data.driveMode());
     }
 
     public boolean isFor(UUID maidId) {
         return data.maidId().equals(maidId);
     }
 
-    /** Applies a server acknowledgement without discarding an in-progress message. */
+    /**
+     * 更新服务端确认的目标，同时保留用户尚未提交的文本。
+     */
     public void refresh(MaidConversationScreenPayload refreshed) {
-        if (!isFor(refreshed.maidId())) {
-            return;
+        if (isFor(refreshed.maidId())) {
+            data = refreshed;
         }
-        this.data = refreshed;
-        this.selectedMode = MaidDriveMode.fromSavedName(refreshed.driveMode());
-        if (environmentVariableBox != null) {
-            environmentVariableBox.setValue(refreshed.apiKeyEnvironmentVariable());
-        }
-        updateControls();
     }
 
     @Override
@@ -58,21 +48,10 @@ public final class MaidConversationScreen extends Screen {
         int left = (width - PANEL_WIDTH) / 2;
         int top = (height - PANEL_HEIGHT) / 2;
 
-        environmentVariableBox = addRenderableWidget(new EditBox(
-                font,
-                left + 14,
-                top + 70,
-                PANEL_WIDTH - 28,
-                20,
-                Component.translatable("gui.ai-partner.dialogue.api_key_env")
-        ));
-        environmentVariableBox.setValue(data.apiKeyEnvironmentVariable());
-        environmentVariableBox.setEditable(false);
-
         messageBox = addRenderableWidget(new EditBox(
                 font,
                 left + 14,
-                top + 116,
+                top + 60,
                 PANEL_WIDTH - 28,
                 20,
                 Component.translatable("gui.ai-partner.dialogue.message")
@@ -81,71 +60,32 @@ public final class MaidConversationScreen extends Screen {
         messageBox.setHint(Component.translatable("gui.ai-partner.dialogue.message_hint"));
         messageBox.setResponder(ignored -> updateControls());
 
-        modeButton = addRenderableWidget(Button.builder(
-                        Component.empty(),
-                        ignored -> {
-                            selectedMode = selectedMode.next();
-                            updateControls();
-                        }
-                )
-                .bounds(left + 14, top + 38, 160, 20)
-                .build());
-        saveButton = addRenderableWidget(Button.builder(
-                        Component.translatable("gui.ai-partner.dialogue.save"),
-                        ignored -> sendSettings()
-                )
-                .bounds(left + 184, top + 38, 162, 20)
-                .build());
         sendButton = addRenderableWidget(Button.builder(
                         Component.translatable("gui.ai-partner.dialogue.send"),
                         ignored -> submitMessage()
                 )
-                .bounds(left + 184, top + 154, 78, 20)
+                .bounds(left + 184, top + 94, 78, 20)
                 .build());
         addRenderableWidget(Button.builder(
                         Component.translatable("gui.ai-partner.dialogue.close"),
                         ignored -> onClose()
                 )
-                .bounds(left + 268, top + 154, 78, 20)
+                .bounds(left + 268, top + 94, 78, 20)
                 .build());
         setInitialFocus(messageBox);
         updateControls();
     }
 
     private void updateControls() {
-        if (modeButton == null || saveButton == null || sendButton == null
-                || environmentVariableBox == null || messageBox == null) {
-            return;
+        if (sendButton != null && messageBox != null) {
+            sendButton.active = !messageBox.getValue().isBlank()
+                    && ClientPlayNetworking.canSend(MaidDialogueSubmitPayload.TYPE);
         }
-        modeButton.setMessage(Component.translatable(
-                "gui.ai-partner.dialogue.mode",
-                Component.translatable("driver.ai-partner." + selectedMode.serializedName())
-        ));
-        saveButton.active = ClientPlayNetworking.canSend(MaidDriverSettingsPayload.TYPE);
-        sendButton.active = !messageBox.getValue().isBlank()
-                && ClientPlayNetworking.canSend(MaidDialogueSubmitPayload.TYPE);
-    }
-
-    private void sendSettings() {
-        if (!ClientPlayNetworking.canSend(MaidDriverSettingsPayload.TYPE)) {
-            return;
-        }
-        ClientPlayNetworking.send(new MaidDriverSettingsPayload(
-                data.maidId(),
-                selectedMode.serializedName()
-        ));
     }
 
     private void submitMessage() {
         String message = messageBox.getValue().strip();
-        if (message.isEmpty()) {
-            return;
-        }
-        boolean settingsChanged = !selectedMode.serializedName().equals(data.driveMode());
-        if (settingsChanged) {
-            sendSettings();
-        }
-        if (ClientPlayNetworking.canSend(MaidDialogueSubmitPayload.TYPE)) {
+        if (!message.isEmpty() && ClientPlayNetworking.canSend(MaidDialogueSubmitPayload.TYPE)) {
             ClientPlayNetworking.send(new MaidDialogueSubmitPayload(data.maidId(), message));
             onClose();
         }
@@ -179,41 +119,27 @@ public final class MaidConversationScreen extends Screen {
                 font,
                 Component.translatable("gui.ai-partner.dialogue.target", data.maidName()),
                 left + 14,
-                top + 24,
+                top + 27,
                 MUTED_COLOR,
                 false
         );
-        graphics.text(font, Component.translatable("gui.ai-partner.dialogue.api_key_env"), left + 14, top + 61, LABEL_COLOR, false);
-        graphics.text(font, Component.translatable("gui.ai-partner.dialogue.message"), left + 14, top + 107, LABEL_COLOR, false);
-        graphics.text(font, readinessLine(), left + 14, top + 94, MUTED_COLOR, false);
         graphics.text(
                 font,
-                Component.translatable(
-                        "gui.ai-partner.dialogue.model",
-                        font.plainSubstrByWidth(data.model(), PANEL_WIDTH - 125)
-                ),
+                Component.translatable("gui.ai-partner.dialogue.local_ready"),
                 left + 14,
-                top + 178,
+                top + 39,
                 MUTED_COLOR,
+                false
+        );
+        graphics.text(
+                font,
+                Component.translatable("gui.ai-partner.dialogue.message"),
+                left + 14,
+                top + 50,
+                LABEL_COLOR,
                 false
         );
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-    }
-
-    private Component readinessLine() {
-        if (selectedMode == MaidDriveMode.LOCAL) {
-            return Component.translatable("gui.ai-partner.dialogue.local_ready");
-        }
-        if (data.requestPending()) {
-            return Component.translatable("gui.ai-partner.dialogue.pending");
-        }
-        if (data.llmReady()) {
-            return Component.translatable("gui.ai-partner.dialogue.llm_ready");
-        }
-        return Component.translatable(
-                "gui.ai-partner.dialogue.readiness."
-                        + data.readinessError().toLowerCase(Locale.ROOT)
-        );
     }
 
     @Override

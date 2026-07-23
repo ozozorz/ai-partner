@@ -13,7 +13,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 
 /**
- * 第一版可收集目标白名单；LLM 或命令均不能绕过此注册表。
+ * 可收集目标白名单；命令、菜单和本地文本入口均不能绕过此注册表。
  */
 public final class AllowedTargets {
     public static final int DEFAULT_COLLECT_RADIUS = 16;

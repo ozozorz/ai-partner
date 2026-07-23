@@ -11,7 +11,7 @@ import java.nio.file.Path;
 import net.fabricmc.loader.api.FabricLoader;
 
 /**
- * 与 LLM 配置分离的服务端生活玩法配置。
+ * 女仆生活玩法的服务端配置。
  */
 public record MaidGameplayConfig(
         int maxMaidsPerOwner,

@@ -14,8 +14,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Limited Chinese/English parser used by the offline driver. It emits the same
- * typed intents as the LLM driver so both paths share validation and execution.
+ * Limited Chinese/English parser used by local dialogue. It emits typed intents
+ * that share the same validation and execution path as commands and menus.
  */
 public final class LocalMaidIntentParser {
     private static final Pattern RADIUS = Pattern.compile(
