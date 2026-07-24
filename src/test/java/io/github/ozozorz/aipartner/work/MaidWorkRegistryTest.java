@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.github.ozozorz.aipartner.skill.MaidSkillType;
 import java.util.EnumSet;
 import org.junit.jupiter.api.Test;
 
@@ -44,5 +45,14 @@ class MaidWorkRegistryTest {
         assertTrue(registry.ruleFor(MaidWorkMode.MINER).orElseThrow().requiresMobGriefing());
         assertFalse(registry.ruleFor(MaidWorkMode.SMELTER).orElseThrow().requiresMobGriefing());
         assertFalse(registry.ruleFor(MaidWorkMode.FISHER).orElseThrow().requiresMobGriefing());
+    }
+
+    @Test
+    void workProfilesDeclareTheirFundamentalSkills() {
+        assertTrue(MaidWorkMode.LUMBERJACK.requiredSkills().contains(MaidSkillType.CHOP_WITH_AXE));
+        assertTrue(MaidWorkMode.MINER.requiredSkills().contains(MaidSkillType.MINE_WITH_PICKAXE));
+        assertTrue(MaidWorkMode.SMELTER.requiredSkills().contains(MaidSkillType.SMELT_IN_FURNACE));
+        assertTrue(MaidWorkMode.SMELTER.requiredSkills().contains(MaidSkillType.REMEMBER_CONTAINER_CONTENTS));
+        assertTrue(MaidWorkMode.FISHER.requiredSkills().contains(MaidSkillType.FISH));
     }
 }

@@ -1,7 +1,6 @@
 package io.github.ozozorz.aipartner.entity.ai.sensing;
 
 import com.google.common.collect.ImmutableSet;
-import io.github.ozozorz.aipartner.combat.CombatPolicy;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import java.util.Set;
 import net.minecraft.server.level.ServerLevel;
@@ -21,8 +20,9 @@ public final class MaidThreatSensor extends Sensor<AiPartnerEntity> {
     @Override
     protected void doTick(ServerLevel level, AiPartnerEntity maid) {
         Brain<AiPartnerEntity> brain = maid.getBrain();
-        if (maid.getCombatPolicy() == CombatPolicy.OFF || maid.isInventoryMenuOpen()) {
+        if (!maid.isTame() || maid.isInventoryMenuOpen()) {
             brain.eraseMemory(MemoryModuleType.ATTACK_TARGET);
+            maid.clearBrainCombatTarget();
             return;
         }
 

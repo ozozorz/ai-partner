@@ -105,32 +105,6 @@ public final class EquipmentLease implements AutoCloseable {
         return Optional.empty();
     }
 
-    /**
-     * 世界重启后从已经持久化的主手和来源槽恢复租约元数据。
-     */
-    public static Optional<EquipmentLease> restore(
-            AiPartnerEntity partner,
-            Predicate<ItemStack> selector,
-            int sourceSlot
-    ) {
-        ItemStack mainHand = partner.getMainHandItem();
-        if (!selector.test(mainHand)) {
-            return acquire(partner, selector);
-        }
-        boolean borrowed = sourceSlot >= 0 && sourceSlot < partner.getInventory().getContainerSize();
-        return Optional.of(new EquipmentLease(
-                partner,
-                selector,
-                borrowed ? sourceSlot : NO_SOURCE_SLOT,
-                mainHand,
-                borrowed
-        ));
-    }
-
-    public int sourceSlot() {
-        return borrowedFromStorage ? sourceSlot : NO_SOURCE_SLOT;
-    }
-
     public boolean isUsable() {
         return !closed && selector.test(partner.getMainHandItem());
     }

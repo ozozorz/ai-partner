@@ -86,7 +86,7 @@ public final class AnimalCareWorkRules {
             return state.getBlock() instanceof BeehiveBlock
                     && state.getValue(BeehiveBlock.HONEY_LEVEL) >= BeehiveBlock.MAX_HONEY_LEVELS
                     && CampfireBlock.isSmokeyPos(context.level(), position)
-                    && context.actions().inventory().hasAnySpace();
+                    && context.skills().inventory().hasAnySpace();
         }
 
         @Override
@@ -105,7 +105,7 @@ public final class AnimalCareWorkRules {
             ).orElse(null);
             if (lease != null) {
                 try (lease) {
-                    if (context.actions().harvestBlock().collectHoney(
+                    if (context.skills().harvestBlock().collectHoney(
                             context.level(),
                             target.fallbackPosition()
                     )) {
@@ -113,7 +113,7 @@ public final class AnimalCareWorkRules {
                     }
                 }
             }
-            return context.actions().harvestBlock().collectHoney(context.level(), target.fallbackPosition())
+            return context.skills().harvestBlock().collectHoney(context.level(), target.fallbackPosition())
                     ? WorkActionResult.SUCCESS
                     : WorkActionResult.RETRY;
         }
@@ -127,7 +127,7 @@ public final class AnimalCareWorkRules {
 
         @Override
         public Optional<WorkTarget> findEntityTarget(MaidWorkContext context) {
-            if (!context.actions().inventory().hasAnySpace()) {
+            if (!context.skills().inventory().hasAnySpace()) {
                 return Optional.empty();
             }
             return nearestLiving(context, entity -> entity instanceof Shearable shearable
@@ -169,7 +169,7 @@ public final class AnimalCareWorkRules {
                 return WorkActionResult.BLOCKED;
             }
             try (lease) {
-                return context.actions().interactEntity().shear(context.level(), entity)
+                return context.skills().interactEntity().shear(context.level(), entity)
                         ? WorkActionResult.SUCCESS
                         : WorkActionResult.RETRY;
             }
@@ -184,7 +184,7 @@ public final class AnimalCareWorkRules {
 
         @Override
         public Optional<WorkTarget> findEntityTarget(MaidWorkContext context) {
-            if (!context.actions().inventory().canAdd(new ItemStack(Items.MILK_BUCKET))) {
+            if (!context.skills().inventory().canAdd(new ItemStack(Items.MILK_BUCKET))) {
                 return Optional.empty();
             }
             return nearestLiving(context, entity -> entity instanceof AbstractCow cow && !cow.isBaby());
@@ -214,7 +214,7 @@ public final class AnimalCareWorkRules {
                     .filter(AbstractCow.class::isInstance)
                     .map(AbstractCow.class::cast)
                     .orElse(null);
-            return cow != null && context.actions().interactEntity().milk(context.level(), cow)
+            return cow != null && context.skills().interactEntity().milk(context.level(), cow)
                     ? WorkActionResult.SUCCESS
                     : WorkActionResult.RETRY;
         }
@@ -259,7 +259,7 @@ public final class AnimalCareWorkRules {
             OptionalInt foodSlot = findSafeFood(context);
             return owner != null
                     && foodSlot.isPresent()
-                    && context.actions().interactEntity().feedOwner(
+                    && context.skills().interactEntity().feedOwner(
                             context.level(),
                             owner,
                             foodSlot.getAsInt()
@@ -267,7 +267,7 @@ public final class AnimalCareWorkRules {
         }
 
         private static OptionalInt findSafeFood(MaidWorkContext context) {
-            return context.actions().inventory().findSlot(stack -> MaidFeedingService.isEdible(stack)
+            return context.skills().inventory().findSlot(stack -> MaidFeedingService.isEdible(stack)
                     && !UNSAFE_OWNER_FOODS.contains(stack.getItem())
                     && stack.get(DataComponents.FOOD) != null);
         }
@@ -319,7 +319,7 @@ public final class AnimalCareWorkRules {
             }
             OptionalInt foodSlot = findFood(context, animal);
             return foodSlot.isPresent()
-                    && context.actions().interactEntity().feedAnimal(
+                    && context.skills().interactEntity().feedAnimal(
                             context.level(),
                             animal,
                             foodSlot.getAsInt(),
@@ -328,7 +328,7 @@ public final class AnimalCareWorkRules {
         }
 
         private static OptionalInt findFood(MaidWorkContext context, Animal animal) {
-            return context.actions().inventory().findSlot(animal::isFood);
+            return context.skills().inventory().findSlot(animal::isFood);
         }
     }
 

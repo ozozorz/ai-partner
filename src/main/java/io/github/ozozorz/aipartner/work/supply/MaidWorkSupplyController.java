@@ -1,8 +1,8 @@
 package io.github.ozozorz.aipartner.work.supply;
 
 import io.github.ozozorz.aipartner.core.action.CraftItemAction;
-import io.github.ozozorz.aipartner.core.action.MaidActions;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
+import io.github.ozozorz.aipartner.skill.MaidSkillSet;
 import io.github.ozozorz.aipartner.work.MaidWorkContext;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -11,7 +11,6 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.gamerules.GameRules;
@@ -29,7 +28,7 @@ public final class MaidWorkSupplyController {
     private static final double TABLE_INTERACTION_DISTANCE_SQUARED = 9.0;
 
     private final AiPartnerEntity partner;
-    private final MaidActions actions;
+    private final MaidSkillSet skills;
     private final Set<BlockPos> ignoredTables = new HashSet<>();
 
     private State state = State.IDLE;
@@ -40,9 +39,9 @@ public final class MaidWorkSupplyController {
     private int pathFailures;
     private int cooldownTicks;
 
-    public MaidWorkSupplyController(AiPartnerEntity partner, MaidActions actions) {
+    public MaidWorkSupplyController(AiPartnerEntity partner, MaidSkillSet skills) {
         this.partner = Objects.requireNonNull(partner, "partner");
-        this.actions = Objects.requireNonNull(actions, "actions");
+        this.skills = Objects.requireNonNull(skills, "skills");
     }
 
     /** 推进一次准备流程；READY 才允许工作规则继续使用目标。 */
@@ -95,7 +94,7 @@ public final class MaidWorkSupplyController {
             MaidWorkContext context,
             WorkSupplyRequirement requirement
     ) {
-        CraftItemAction.CraftResult personal = actions.craftItem().craftNext(
+        CraftItemAction.CraftResult personal = skills.craftItem().craftNext(
                 context.level(),
                 requirement.craftTargets(),
                 CraftItemAction.CraftingGrid.PERSONAL_2X2
@@ -104,7 +103,7 @@ public final class MaidWorkSupplyController {
             stateTicks = 0;
             return PreparationStatus.PREPARING;
         }
-        if (!actions.craftItem().canPlanAny(
+        if (!skills.craftItem().canPlanAny(
                 context.level(),
                 requirement.craftTargets(),
                 CraftItemAction.CraftingGrid.WORKBENCH_3X3
@@ -157,7 +156,7 @@ public final class MaidWorkSupplyController {
             transition(State.PLACE_TABLE);
             return PreparationStatus.PREPARING;
         }
-        CraftItemAction.CraftResult result = actions.craftItem().craftNext(
+        CraftItemAction.CraftResult result = skills.craftItem().craftNext(
                 context.level(),
                 java.util.List.of(Items.CRAFTING_TABLE),
                 CraftItemAction.CraftingGrid.PERSONAL_2X2
@@ -176,17 +175,16 @@ public final class MaidWorkSupplyController {
         if (placement == null) {
             return enterCooldown();
         }
-        ItemStack table = actions.inventory().takeOne(Items.CRAFTING_TABLE);
-        if (table.isEmpty()) {
+        if (!containsStorageItem(Items.CRAFTING_TABLE)) {
             transition(State.CRAFT_TABLE);
             return PreparationStatus.PREPARING;
         }
-        if (!actions.placeBlock().place(
+        if (!skills.placeBlock().placeHeld(
                 context.level(),
                 placement,
-                Blocks.CRAFTING_TABLE.defaultBlockState()
+                Blocks.CRAFTING_TABLE.defaultBlockState(),
+                stack -> stack.is(Items.CRAFTING_TABLE)
         )) {
-            actions.inventory().add(table);
             return enterCooldown();
         }
         tablePosition = placement.immutable();
@@ -201,14 +199,14 @@ public final class MaidWorkSupplyController {
             return PreparationStatus.PREPARING;
         }
         if (partner.distanceToSqr(tablePosition.getCenter()) <= TABLE_INTERACTION_DISTANCE_SQUARED) {
-            actions.navigation().stop();
+            skills.navigation().stop();
             transition(State.CRAFT_AT_TABLE);
             return PreparationStatus.PREPARING;
         }
         if (stateTicks % 10 != 1) {
             return PreparationStatus.PREPARING;
         }
-        boolean started = actions.navigation().moveTo(tablePosition, 0.9);
+        boolean started = skills.navigation().moveTo(tablePosition, 0.9);
         pathFailures = started ? 0 : pathFailures + 1;
         if (pathFailures > partner.getWorkPathRetryLimit(MAX_PATH_FAILURES)) {
             ignoreCurrentTable();
@@ -226,7 +224,7 @@ public final class MaidWorkSupplyController {
             transition(State.NAVIGATE_TABLE);
             return PreparationStatus.PREPARING;
         }
-        CraftItemAction.CraftResult result = actions.craftItem().craftNext(
+        CraftItemAction.CraftResult result = skills.craftItem().craftNext(
                 context.level(),
                 requirement.craftTargets(),
                 CraftItemAction.CraftingGrid.WORKBENCH_3X3
@@ -309,7 +307,7 @@ public final class MaidWorkSupplyController {
     }
 
     private PreparationStatus enterCooldown() {
-        actions.navigation().stop();
+        skills.navigation().stop();
         cooldownTicks = RETRY_COOLDOWN_TICKS;
         transition(State.COOLDOWN);
         return PreparationStatus.UNAVAILABLE;
@@ -322,7 +320,7 @@ public final class MaidWorkSupplyController {
 
     private void reset(boolean stopSupplyNavigation) {
         if (stopSupplyNavigation && state == State.NAVIGATE_TABLE) {
-            actions.navigation().stop();
+            skills.navigation().stop();
         }
         state = State.IDLE;
         tableScan = null;

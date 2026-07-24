@@ -3,7 +3,7 @@
   "id": "ai-partner",
   "version": "${version}",
   "name": "AI Partner",
-  "description": "A server-authoritative maid companion for Minecraft with local dialogue, validated task contracts, and Brain-based entity AI.",
+  "description": "A server-authoritative maid companion with skill-based work, wolf-like combat, equipment automation, and Minecraft-native taming.",
   "authors": [
     "ozozorz"
   ],

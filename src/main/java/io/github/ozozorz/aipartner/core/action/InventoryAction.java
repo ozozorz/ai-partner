@@ -47,16 +47,6 @@ public final class InventoryAction {
         return partner.getInventory().removeItem(slot, amount);
     }
 
-    public ItemStack takeOne(Item item) {
-        OptionalInt slot = findSlot(stack -> stack.is(item));
-        return slot.isPresent() ? take(slot.getAsInt(), 1) : ItemStack.EMPTY;
-    }
-
-    public ItemStack takeOne(Predicate<ItemStack> predicate) {
-        OptionalInt slot = findSlot(predicate);
-        return slot.isPresent() ? take(slot.getAsInt(), 1) : ItemStack.EMPTY;
-    }
-
     public boolean add(ItemStack stack) {
         return stack.isEmpty() || partner.getInventory().addItem(stack).isEmpty();
     }

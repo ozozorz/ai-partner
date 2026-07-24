@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -64,19 +63,12 @@ public final class EnvironmentWorkRules {
 
         @Override
         public WorkActionResult perform(MaidWorkContext context, WorkTarget target) {
-            ItemStack torch = context.actions().inventory().takeOne(Items.TORCH);
-            if (torch.isEmpty()) {
-                return WorkActionResult.BLOCKED;
-            }
-            if (!context.actions().placeBlock().place(
+            return context.skills().placeBlock().placeHeld(
                     context.level(),
                     target.fallbackPosition(),
-                    Blocks.TORCH.defaultBlockState()
-            )) {
-                context.actions().inventory().add(torch);
-                return WorkActionResult.RETRY;
-            }
-            return WorkActionResult.SUCCESS;
+                    Blocks.TORCH.defaultBlockState(),
+                    stack -> stack.is(Items.TORCH)
+            ) ? WorkActionResult.SUCCESS : WorkActionResult.RETRY;
         }
 
         private static boolean noNearbyTorch(MaidWorkContext context, BlockPos position) {
@@ -147,7 +139,7 @@ public final class EnvironmentWorkRules {
         @Override
         public WorkActionResult perform(MaidWorkContext context, WorkTarget target) {
             if (!target.isEntity()) {
-                return context.actions().breakBlock().removeWithoutTool(
+                return context.skills().breakBlock().removeWithoutTool(
                         context.level(),
                         target.fallbackPosition()
                 ) ? WorkActionResult.SUCCESS : WorkActionResult.RETRY;
@@ -156,7 +148,7 @@ public final class EnvironmentWorkRules {
                     .filter(LivingEntity.class::isInstance)
                     .map(LivingEntity.class::cast)
                     .orElse(null);
-            return entity != null && context.actions().interactEntity().extinguish(entity)
+            return entity != null && context.skills().interactEntity().extinguish(entity)
                     ? WorkActionResult.SUCCESS
                     : WorkActionResult.RETRY;
         }

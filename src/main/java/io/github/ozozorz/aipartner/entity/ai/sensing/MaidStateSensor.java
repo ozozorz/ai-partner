@@ -1,9 +1,9 @@
 package io.github.ozozorz.aipartner.entity.ai.sensing;
 
 import com.google.common.collect.ImmutableSet;
-import io.github.ozozorz.aipartner.core.behavior.ManualDirective;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleActivity;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
+import io.github.ozozorz.aipartner.entity.PartnerMode;
 import io.github.ozozorz.aipartner.registry.ModMemoryModules;
 import java.util.Set;
 import net.minecraft.core.GlobalPos;
@@ -14,13 +14,13 @@ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.sensing.Sensor;
 
 /**
- * 每 tick 把权威任务、指令和日程状态投影为 Brain 短期记忆。
+ * 每 tick 把三种长期模式、日程和工作控制状态投影为 Brain 短期记忆。
  */
 public final class MaidStateSensor extends Sensor<AiPartnerEntity> {
-    private ManualDirective previousDirective = ManualDirective.NONE;
+    private PartnerMode previousMode = PartnerMode.STAY;
     private ScheduleActivity previousScheduleActivity = ScheduleActivity.LEISURE;
     private boolean previousPaused;
-    private boolean previousTaskControlled;
+    private boolean previousWorkControlled;
     private boolean previousActivityTargetPresent;
 
     public MaidStateSensor() {
@@ -31,32 +31,32 @@ public final class MaidStateSensor extends Sensor<AiPartnerEntity> {
     protected void doTick(ServerLevel level, AiPartnerEntity maid) {
         Brain<AiPartnerEntity> brain = maid.getBrain();
         boolean paused = maid.isInventoryMenuOpen();
-        boolean taskControlled = maid.hasFiniteTaskRunning();
-        ManualDirective directive = maid.getManualDirective();
+        boolean workControlled = maid.isWorkControllerActive();
+        PartnerMode mode = maid.getMode();
         ScheduleActivity scheduleActivity = maid.getScheduleActivity();
-        boolean controlStateChanged = directive != previousDirective
+        boolean controlStateChanged = mode != previousMode
                 || scheduleActivity != previousScheduleActivity
                 || paused != previousPaused
-                || taskControlled != previousTaskControlled;
+                || workControlled != previousWorkControlled;
         if (controlStateChanged) {
             clearMovementIntent(brain);
         }
         setMarker(brain, ModMemoryModules.PAUSED, paused);
-        setMarker(brain, ModMemoryModules.TASK_CONTROLLED, taskControlled);
+        setMarker(brain, ModMemoryModules.WORK_CONTROLLED, workControlled);
 
-        boolean acceptsAutonomousMovement = !paused && !taskControlled;
+        boolean acceptsAutonomousMovement = !paused && !workControlled;
         setMarker(
                 brain,
                 ModMemoryModules.FOLLOW_OWNER,
-                acceptsAutonomousMovement && directive == ManualDirective.FOLLOW
+                acceptsAutonomousMovement && mode == PartnerMode.FOLLOW
         );
         setMarker(
                 brain,
                 ModMemoryModules.STAY_IN_PLACE,
-                acceptsAutonomousMovement && directive == ManualDirective.STAY
+                acceptsAutonomousMovement && mode == PartnerMode.STAY
         );
 
-        boolean scheduleControlsActivity = acceptsAutonomousMovement && directive == ManualDirective.NONE;
+        boolean scheduleControlsActivity = acceptsAutonomousMovement && mode == PartnerMode.WORK;
         setMarker(
                 brain,
                 ModMemoryModules.SCHEDULE_WORK,
@@ -74,8 +74,7 @@ public final class MaidStateSensor extends Sensor<AiPartnerEntity> {
         );
 
         boolean activityTargetPresent = acceptsAutonomousMovement
-                && directive != ManualDirective.FOLLOW
-                && directive != ManualDirective.STAY
+                && mode == PartnerMode.WORK
                 && maid.getActivityNavigationTarget().isPresent();
         if (activityTargetPresent) {
             maid.getActivityNavigationTarget().ifPresentOrElse(
@@ -92,16 +91,16 @@ public final class MaidStateSensor extends Sensor<AiPartnerEntity> {
             }
         }
 
-        if (paused || taskControlled || directive == ManualDirective.STAY) {
+        if (paused || workControlled || mode == PartnerMode.STAY) {
             clearMovementIntent(brain);
         }
-        if (paused || directive == ManualDirective.STAY) {
+        if (paused || mode == PartnerMode.STAY) {
             maid.getNavigation().stop();
         }
-        previousDirective = directive;
+        previousMode = mode;
         previousScheduleActivity = scheduleActivity;
         previousPaused = paused;
-        previousTaskControlled = taskControlled;
+        previousWorkControlled = workControlled;
         previousActivityTargetPresent = activityTargetPresent;
     }
 
@@ -111,7 +110,7 @@ public final class MaidStateSensor extends Sensor<AiPartnerEntity> {
                 ModMemoryModules.FOLLOW_OWNER,
                 ModMemoryModules.STAY_IN_PLACE,
                 ModMemoryModules.PAUSED,
-                ModMemoryModules.TASK_CONTROLLED,
+                ModMemoryModules.WORK_CONTROLLED,
                 ModMemoryModules.AMBIENT_MOVEMENT,
                 ModMemoryModules.SCHEDULE_WORK,
                 ModMemoryModules.SCHEDULE_REST,

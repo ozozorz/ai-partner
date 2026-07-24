@@ -160,14 +160,14 @@ public final class FishingWorkRule implements MaidWorkRule {
             return;
         }
         if (context.partner().distanceToSqr(bankPosition.getCenter()) <= ARRIVAL_DISTANCE_SQUARED) {
-            context.actions().navigation().stop();
+            context.skills().navigation().stop();
             transition(State.EQUIP_ROD);
             return;
         }
         if (stateTicks % 10 != 1) {
             return;
         }
-        boolean started = context.actions().navigation().moveTo(bankPosition, 0.9);
+        boolean started = context.skills().navigation().moveTo(bankPosition, 0.9);
         pathFailures = started ? 0 : pathFailures + 1;
         if (pathFailures > context.partner().getWorkPathRetryLimit(3)) {
             resetSite(State.SEARCH_WATER);
@@ -253,7 +253,7 @@ public final class FishingWorkRule implements MaidWorkRule {
     }
 
     private void pickUpLoot(MaidWorkContext context) {
-        ItemEntity drop = context.actions().pickupItem().findNearest(
+        ItemEntity drop = context.skills().pickupItem().findNearest(
                 context.level(),
                 context.partner().blockPosition(),
                 DROP_SEARCH_RADIUS,
@@ -265,7 +265,7 @@ public final class FishingWorkRule implements MaidWorkRule {
             return;
         }
         if (stateTicks % 5 == 1) {
-            context.actions().pickupItem().moveTo(drop, 1.0);
+            context.skills().pickupItem().moveTo(drop, 1.0);
         }
     }
 

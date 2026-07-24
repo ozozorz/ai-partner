@@ -1,42 +1,70 @@
 package io.github.ozozorz.aipartner.work;
 
+import io.github.ozozorz.aipartner.skill.MaidSkillType;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 /**
- * 玩家为女仆选择的持续工作策略；具体动作由注册表中的工作规则提供。
+ * WORK 模式内可选择的持续工作配置。
+ *
+ * <p>每个配置只是基础技能的组合与循环规则，不再表示一次性任务或任务类型。</p>
  */
 public enum MaidWorkMode {
     NONE("none"),
-    FARMER("farmer"),
-    SUGAR_CANE("sugar-cane"),
-    MELON("melon"),
-    COCOA("cocoa"),
-    FORAGER("forager"),
-    SNOW_CLEARER("snow-clearer"),
-    BEEKEEPER("beekeeper"),
-    SHEARER("shearer"),
-    MILKER("milker"),
-    CAREGIVER("caregiver"),
-    BREEDER("breeder"),
-    TORCH_BEARER("torch-bearer"),
-    FIREFIGHTER("firefighter"),
-    LUMBERJACK("lumberjack"),
-    MINER("miner"),
-    SMELTER("smelter"),
-    FISHER("fisher");
+    FARMER("farmer", MaidSkillType.NAVIGATE, MaidSkillType.HARVEST_CROP, MaidSkillType.PLANT_CROP),
+    SUGAR_CANE("sugar-cane", MaidSkillType.NAVIGATE, MaidSkillType.BREAK_BLOCK_BY_HAND, MaidSkillType.PLACE_BLOCK),
+    MELON("melon", MaidSkillType.NAVIGATE, MaidSkillType.BREAK_BLOCK_BY_HAND),
+    COCOA("cocoa", MaidSkillType.NAVIGATE, MaidSkillType.HARVEST_CROP, MaidSkillType.PLANT_CROP),
+    FORAGER("forager", MaidSkillType.NAVIGATE, MaidSkillType.BREAK_BLOCK_BY_HAND),
+    SNOW_CLEARER("snow-clearer", MaidSkillType.NAVIGATE, MaidSkillType.DIG_WITH_SHOVEL),
+    BEEKEEPER("beekeeper", MaidSkillType.NAVIGATE, MaidSkillType.COLLECT_HONEY),
+    SHEARER("shearer", MaidSkillType.NAVIGATE, MaidSkillType.SHEAR),
+    MILKER("milker", MaidSkillType.NAVIGATE, MaidSkillType.MILK),
+    CAREGIVER("caregiver", MaidSkillType.NAVIGATE, MaidSkillType.FEED_OWNER),
+    BREEDER("breeder", MaidSkillType.NAVIGATE, MaidSkillType.FEED_ANIMAL),
+    TORCH_BEARER("torch-bearer", MaidSkillType.NAVIGATE, MaidSkillType.PLACE_BLOCK),
+    FIREFIGHTER("firefighter", MaidSkillType.NAVIGATE, MaidSkillType.EXTINGUISH_FIRE),
+    LUMBERJACK(
+            "lumberjack",
+            MaidSkillType.NAVIGATE,
+            MaidSkillType.BREAK_BLOCK_BY_HAND,
+            MaidSkillType.CHOP_WITH_AXE
+    ),
+    MINER("miner", MaidSkillType.NAVIGATE, MaidSkillType.MINE_WITH_PICKAXE),
+    SMELTER(
+            "smelter",
+            MaidSkillType.NAVIGATE,
+            MaidSkillType.SMELT_IN_FURNACE,
+            MaidSkillType.OPEN_CONTAINER,
+            MaidSkillType.TAKE_FROM_CONTAINER,
+            MaidSkillType.STORE_IN_CONTAINER,
+            MaidSkillType.REMEMBER_CONTAINER_CONTENTS
+    ),
+    FISHER("fisher", MaidSkillType.NAVIGATE, MaidSkillType.FISH, MaidSkillType.PICK_UP_ITEM);
 
     private static final int MENU_BUTTON_BASE = 100;
 
     private final String serializedName;
+    private final Set<MaidSkillType> requiredSkills;
 
-    MaidWorkMode(String serializedName) {
+    MaidWorkMode(String serializedName, MaidSkillType... requiredSkills) {
         this.serializedName = serializedName;
+        EnumSet<MaidSkillType> set = requiredSkills.length == 0
+                ? EnumSet.noneOf(MaidSkillType.class)
+                : EnumSet.copyOf(Arrays.asList(requiredSkills));
+        this.requiredSkills = Collections.unmodifiableSet(set);
     }
 
     public String serializedName() {
         return serializedName;
+    }
+
+    public Set<MaidSkillType> requiredSkills() {
+        return requiredSkills;
     }
 
     public MaidWorkMode next() {

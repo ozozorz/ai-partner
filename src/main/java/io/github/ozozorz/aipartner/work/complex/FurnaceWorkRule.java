@@ -211,14 +211,14 @@ public final class FurnaceWorkRule implements MaidWorkRule {
             return;
         }
         if (context.partner().distanceToSqr(furnacePosition.getCenter()) <= INTERACTION_DISTANCE_SQUARED) {
-            context.actions().navigation().stop();
+            context.skills().navigation().stop();
             transition(State.ACQUIRE_LEASE);
             return;
         }
         if (stateTicks % 10 != 1) {
             return;
         }
-        boolean started = context.actions().navigation().moveTo(furnacePosition, 0.9);
+        boolean started = context.skills().navigation().moveTo(furnacePosition, 0.9);
         pathFailures = started ? 0 : pathFailures + 1;
         if (pathFailures > context.partner().getWorkPathRetryLimit(3)) {
             retryFurnaceSearch();
@@ -256,7 +256,7 @@ public final class FurnaceWorkRule implements MaidWorkRule {
         }
         ItemStack fuel = removeExact(context.partner().getInventory(), plannedFuel);
         if (fuel.isEmpty()) {
-            context.actions().inventory().add(input);
+            context.skills().inventory().add(input);
             abortCycle(context);
             return;
         }
@@ -289,14 +289,14 @@ public final class FurnaceWorkRule implements MaidWorkRule {
         FurnaceBlockEntity furnace = resolveLeasedFurnace(context).orElse(null);
         if (furnace == null
                 || !contentsRespectConservation(furnace)
-                || !context.actions().inventory().canAdd(plannedResult)) {
+                || !context.skills().inventory().canAdd(plannedResult)) {
             abortCycle(context);
             return;
         }
         ItemStack output = furnace.removeItem(2, plannedResult.getCount());
         if (!ItemStack.isSameItemSameComponents(output, plannedResult)
                 || output.getCount() != plannedResult.getCount()
-                || !context.actions().inventory().add(output)) {
+                || !context.skills().inventory().add(output)) {
             if (!output.isEmpty()) {
                 furnace.setItem(2, output);
             }

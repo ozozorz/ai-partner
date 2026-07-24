@@ -1,6 +1,5 @@
 package io.github.ozozorz.aipartner.entity.ai;
 
-import io.github.ozozorz.aipartner.contract.FailureCode;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.registry.ModMemoryModules;
 import java.util.Set;
@@ -25,7 +24,6 @@ public final class MaidMovementBehaviors {
     private static final double FOLLOW_STOP_DISTANCE_SQUARED = 3.0 * 3.0;
     private static final double FOLLOW_TELEPORT_DISTANCE_SQUARED = 12.0 * 12.0;
     private static final long TELEPORT_AFTER_UNREACHABLE_TICKS = 60L;
-    private static final long FAIL_AFTER_UNREACHABLE_TICKS = 200L;
 
     private MaidMovementBehaviors() {
     }
@@ -88,10 +86,10 @@ public final class MaidMovementBehaviors {
                 instance -> instance.group(
                                 instance.present(ModMemoryModules.ACTIVITY_TARGET),
                                 instance.absent(ModMemoryModules.PAUSED),
-                                instance.absent(ModMemoryModules.TASK_CONTROLLED),
+                                instance.absent(ModMemoryModules.WORK_CONTROLLED),
                                 instance.registered(MemoryModuleType.WALK_TARGET)
                         )
-                        .apply(instance, (activityTarget, notPaused, notTaskControlled, walkTarget) ->
+                        .apply(instance, (activityTarget, notPaused, notWorkControlled, walkTarget) ->
                                 (level, maid, timestamp) -> {
                                     GlobalPos target = instance.get(activityTarget);
                                     if (target.dimension() != level.dimension()) {
@@ -120,7 +118,7 @@ public final class MaidMovementBehaviors {
         private static final Set<MemoryModuleType<?>> REQUIRED_MEMORIES = Set.of(
                 ModMemoryModules.FOLLOW_OWNER,
                 ModMemoryModules.PAUSED,
-                ModMemoryModules.TASK_CONTROLLED,
+                ModMemoryModules.WORK_CONTROLLED,
                 MemoryModuleType.WALK_TARGET,
                 MemoryModuleType.LOOK_TARGET,
                 MemoryModuleType.CANT_REACH_WALK_TARGET_SINCE
@@ -135,7 +133,7 @@ public final class MaidMovementBehaviors {
             Brain<AiPartnerEntity> brain = maid.getBrain();
             if (!brain.checkMemory(ModMemoryModules.FOLLOW_OWNER, MemoryStatus.VALUE_PRESENT)
                     || !brain.checkMemory(ModMemoryModules.PAUSED, MemoryStatus.VALUE_ABSENT)
-                    || !brain.checkMemory(ModMemoryModules.TASK_CONTROLLED, MemoryStatus.VALUE_ABSENT)) {
+                    || !brain.checkMemory(ModMemoryModules.WORK_CONTROLLED, MemoryStatus.VALUE_ABSENT)) {
                 followingMovement = false;
                 return false;
             }
@@ -181,12 +179,11 @@ public final class MaidMovementBehaviors {
                     } else {
                         teleportFailures++;
                         brain.setMemory(MemoryModuleType.CANT_REACH_WALK_TARGET_SINCE, timestamp);
-                        if (teleportFailures > maid.getMaximumLocalRetries()) {
-                            maid.failActiveContract(FailureCode.PATH_UNREACHABLE);
+                        if (teleportFailures > maid.getWorkPathRetryLimit(3)) {
+                            teleportFailures = 0;
+                            brain.eraseMemory(MemoryModuleType.WALK_TARGET);
                         }
                     }
-                } else if (unreachableTicks >= FAIL_AFTER_UNREACHABLE_TICKS) {
-                    maid.failActiveContract(FailureCode.PATH_UNREACHABLE);
                 }
             });
             return true;

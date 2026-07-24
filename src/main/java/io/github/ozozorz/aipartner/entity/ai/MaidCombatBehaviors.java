@@ -64,6 +64,7 @@ public final class MaidCombatBehaviors {
                                         return false;
                                     }
 
+                                    maid.updateShieldDefense(target);
                                     lookTarget.set(new EntityTracker(target, true));
                                     double distanceSquared = maid.distanceToSqr(target);
                                     if (maid.shouldUseRangedCombat(target)

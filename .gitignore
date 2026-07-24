@@ -1,6 +1,7 @@
 .gradle/
 .gradle-user-home/
 build/
+/bin/
 run/
 logs/
 *.iml

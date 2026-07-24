@@ -1,7 +1,7 @@
 package io.github.ozozorz.aipartner.service;
 
-import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
+import io.github.ozozorz.aipartner.entity.PartnerMode;
 import io.github.ozozorz.aipartner.registry.ModEntities;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -95,22 +95,10 @@ public final class PartnerService {
         return Optional.of(selected);
     }
 
-    public static int indexedOwnedCount(ServerPlayer player) {
-        findOwnedPartners(player);
-        return MaidOwnershipState.get(player.level().getServer()).ownedCount(player.getUUID());
-    }
-
-    public static boolean mayOwnAnother(ServerPlayer player) {
-        return indexedOwnedCount(player) < MaidGameplayConfig.get().maxMaidsPerOwner();
-    }
-
     /**
      * 在玩家附近寻找安全位置，生成后立即绑定、登记并选中新女仆。
      */
     public static Optional<AiPartnerEntity> spawnPartner(ServerPlayer player) {
-        if (!mayOwnAnother(player)) {
-            return Optional.empty();
-        }
         ServerLevel level = player.level();
         AiPartnerEntity entity = ModEntities.AI_PARTNER.create(level, EntitySpawnReason.COMMAND);
         if (entity == null || !placeAtSafeNearbyPosition(level, player, entity)) {
@@ -118,6 +106,7 @@ public final class PartnerService {
         }
         entity.tame(player);
         entity.setPersistenceRequired();
+        entity.setMode(PartnerMode.FOLLOW);
         String suffix = entity.getStringUUID().substring(0, 4).toUpperCase(Locale.ROOT);
         entity.setCustomName(Component.translatable("entity.ai-partner.ai_partner_named", suffix));
         entity.setCustomNameVisible(true);

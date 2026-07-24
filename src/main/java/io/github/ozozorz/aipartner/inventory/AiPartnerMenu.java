@@ -1,26 +1,17 @@
 package io.github.ozozorz.aipartner.inventory;
 
-import io.github.ozozorz.aipartner.contract.ContractStatus;
-import io.github.ozozorz.aipartner.combat.CombatPolicy;
-import io.github.ozozorz.aipartner.control.MaidActionRegistry;
-import io.github.ozozorz.aipartner.control.MaidActionRequest;
-import io.github.ozozorz.aipartner.control.MaidControlDecision;
-import io.github.ozozorz.aipartner.control.MaidControlIntent;
-import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
-import io.github.ozozorz.aipartner.entity.PartnerMenuAction;
-import io.github.ozozorz.aipartner.entity.PartnerMode;
-import io.github.ozozorz.aipartner.job.JobType;
 import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleActivity;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
+import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
+import io.github.ozozorz.aipartner.entity.PartnerMenuAction;
+import io.github.ozozorz.aipartner.entity.PartnerMode;
 import io.github.ozozorz.aipartner.life.ActivityLocationType;
 import io.github.ozozorz.aipartner.registry.ModMenus;
 import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import java.util.Optional;
 import net.minecraft.core.component.DataComponents;
-import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.resources.Identifier;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
@@ -30,85 +21,67 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerData;
-import net.minecraft.world.inventory.CraftingContainer;
 import net.minecraft.world.inventory.InventoryMenu;
-import net.minecraft.world.inventory.ResultContainer;
-import net.minecraft.world.inventory.ResultSlot;
 import net.minecraft.world.inventory.SimpleContainerData;
 import net.minecraft.world.inventory.Slot;
-import net.minecraft.world.inventory.TransientCraftingContainer;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.CraftingInput;
-import net.minecraft.world.item.crafting.CraftingRecipe;
-import net.minecraft.world.item.crafting.RecipeHolder;
-import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.equipment.Equippable;
 import org.jspecify.annotations.Nullable;
 
 /**
- * AI 女仆的服务端权威背包菜单，包含原生主手、35 格储物、四格护甲和副手。
+ * AI 女仆的服务端权威菜单：主手、35 格储物、四格护甲和副手。
+ *
+ * <p>2×2 制作仍是女仆技能，但不再伪装成玩家可手动操作的菜单槽。</p>
  */
 public final class AiPartnerMenu extends AbstractContainerMenu {
     public static final int STORAGE_SLOT_COUNT = 36;
     public static final int EQUIPMENT_SLOT_COUNT = AiPartnerEquipmentContainer.SLOT_COUNT;
     public static final int PARTNER_SLOT_END = STORAGE_SLOT_COUNT + EQUIPMENT_SLOT_COUNT;
-    public static final int CRAFT_INPUT_SLOT_START = PARTNER_SLOT_END;
-    public static final int CRAFT_INPUT_SLOT_END = CRAFT_INPUT_SLOT_START + 4;
-    public static final int CRAFT_RESULT_SLOT = CRAFT_INPUT_SLOT_END;
-    public static final int CRAFT_SLOT_END = CRAFT_RESULT_SLOT + 1;
-    public static final int PLAYER_SLOT_START = CRAFT_SLOT_END;
+    public static final int PLAYER_SLOT_START = PARTNER_SLOT_END;
     public static final int PLAYER_MAIN_SLOT_END = PLAYER_SLOT_START + 27;
     public static final int PLAYER_SLOT_END = PLAYER_SLOT_START + 36;
 
     public static final int STORAGE_LEFT = 114;
     public static final int STORAGE_TOP = 20;
     public static final int EQUIPMENT_LEFT = 8;
-    public static final int EQUIPMENT_TOP = 148;
+    public static final int EQUIPMENT_TOP = 168;
     public static final int PLAYER_LEFT = 114;
     public static final int PLAYER_TOP = 140;
-    public static final int CRAFTING_LEFT = 290;
-    public static final int CRAFTING_TOP = 20;
-    public static final int CRAFTING_RESULT_LEFT = 354;
-    public static final int CRAFTING_RESULT_TOP = 29;
     public static final int SCREEN_WIDTH = 382;
     public static final int SCREEN_HEIGHT = 230;
 
     private static final int DATA_MODE = 0;
-    private static final int DATA_JOB = 1;
-    private static final int DATA_CONTRACT_STATUS = 2;
-    private static final int DATA_HEALTH = 3;
-    private static final int DATA_MAX_HEALTH = 4;
-    private static final int DATA_SCHEDULE_TYPE = 5;
-    private static final int DATA_SCHEDULE_ACTIVITY = 6;
-    private static final int DATA_HOME_BOUND = 7;
-    private static final int DATA_ACTIVITY_RADIUS = 8;
-    private static final int DATA_NEXT_SCHEDULE_CHANGE = 9;
-    private static final int DATA_LOCATION_MASK = 10;
-    private static final int DATA_AFFECTION = 11;
-    private static final int DATA_GROWTH_LEVEL = 12;
-    private static final int DATA_GROWTH_EXPERIENCE = 13;
-    private static final int DATA_MAX_ACTIVITY_RADIUS = 14;
-    private static final int DATA_WORK_MODE = 15;
-    private static final int DATA_COMBAT_POLICY = 16;
-    private static final int DATA_COUNT = 17;
+    private static final int DATA_HEALTH = 1;
+    private static final int DATA_MAX_HEALTH = 2;
+    private static final int DATA_SCHEDULE_TYPE = 3;
+    private static final int DATA_SCHEDULE_ACTIVITY = 4;
+    private static final int DATA_HOME_BOUND = 5;
+    private static final int DATA_ACTIVITY_RADIUS = 6;
+    private static final int DATA_NEXT_SCHEDULE_CHANGE = 7;
+    private static final int DATA_LOCATION_MASK = 8;
+    private static final int DATA_AFFECTION = 9;
+    private static final int DATA_GROWTH_LEVEL = 10;
+    private static final int DATA_GROWTH_EXPERIENCE = 11;
+    private static final int DATA_MAX_ACTIVITY_RADIUS = 12;
+    private static final int DATA_WORK_MODE = 13;
+    private static final int DATA_SKILL_COUNT = 14;
+    private static final int DATA_CONTAINER_MEMORY_COUNT = 15;
+    private static final int DATA_COUNT = 16;
 
     private final @Nullable AiPartnerEntity partner;
     private final ContainerData stateData;
-    private final Player menuPlayer;
-    private final CraftingContainer craftingInput;
-    private final ResultContainer craftingResult;
 
     /**
-     * 客户端工厂构造器；实体编号来自 Fabric 扩展菜单的打开数据。
+     * 客户端工厂构造器；实体编号来自 Fabric 扩展菜单数据。
      */
     public AiPartnerMenu(int containerId, Inventory playerInventory, Integer entityId) {
         this(containerId, playerInventory, resolvePartner(playerInventory, entityId), createClientStateData(), false);
     }
 
     /**
-     * 服务端构造器，直接连接实体真实物品栏和动态状态数据。
+     * 服务端构造器，直接连接实体物品栏和动态状态。
      */
     public AiPartnerMenu(int containerId, Inventory playerInventory, AiPartnerEntity partner) {
         this(containerId, playerInventory, partner, createLiveStateData(partner), true);
@@ -124,12 +97,8 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
         super(ModMenus.AI_PARTNER, containerId);
         this.partner = partner;
         this.stateData = stateData;
-        this.menuPlayer = playerInventory.player;
-        this.craftingInput = new TransientCraftingContainer(this, 2, 2);
-        this.craftingResult = new ResultContainer();
-        Container mainHand = partner == null
-                ? new SimpleContainer(1)
-                : new AiPartnerMainHandContainer(partner);
+
+        Container mainHand = partner == null ? new SimpleContainer(1) : new AiPartnerMainHandContainer(partner);
         Container storage = partner == null
                 ? new SimpleContainer(MaidInventoryPersistence.STORAGE_SLOT_COUNT)
                 : partner.getInventory();
@@ -171,25 +140,6 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
                 InventoryMenu.EMPTY_ARMOR_SLOT_SHIELD
         ));
 
-        for (int row = 0; row < 2; row++) {
-            for (int column = 0; column < 2; column++) {
-                addSlot(new Slot(
-                        craftingInput,
-                        column + row * 2,
-                        CRAFTING_LEFT + column * 18,
-                        CRAFTING_TOP + row * 18
-                ));
-            }
-        }
-        addSlot(new ResultSlot(
-                playerInventory.player,
-                craftingInput,
-                craftingResult,
-                0,
-                CRAFTING_RESULT_LEFT,
-                CRAFTING_RESULT_TOP
-        ));
-
         addStandardInventorySlots(playerInventory, PLAYER_LEFT, PLAYER_TOP);
         addDataSlots(stateData);
         if (serverSide && partner != null) {
@@ -214,19 +164,12 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
         if (!sourceSlot.hasItem()) {
             return ItemStack.EMPTY;
         }
-
         ItemStack source = sourceSlot.getItem();
         ItemStack original = source.copy();
-        if (slotIndex < CRAFT_INPUT_SLOT_END) {
+        if (slotIndex < PARTNER_SLOT_END) {
             if (!moveItemStackTo(source, PLAYER_SLOT_START, PLAYER_SLOT_END, true)) {
                 return ItemStack.EMPTY;
             }
-        } else if (slotIndex == CRAFT_RESULT_SLOT) {
-            source.getItem().onCraftedBy(source, player);
-            if (!moveItemStackTo(source, PLAYER_SLOT_START, PLAYER_SLOT_END, true)) {
-                return ItemStack.EMPTY;
-            }
-            sourceSlot.onQuickCraft(source, original);
         } else {
             boolean movedToEquipment = tryQuickEquip(source);
             if (!movedToEquipment && !moveItemStackTo(source, 1, STORAGE_SLOT_COUNT, false)) {
@@ -238,7 +181,6 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
                 }
             }
         }
-
         if (source.isEmpty()) {
             sourceSlot.setByPlayer(ItemStack.EMPTY, original);
         } else {
@@ -251,117 +193,54 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
         return original;
     }
 
+    /**
+     * 所有菜单按钮都在服务端按固定枚举解释，客户端不能构造任意操作。
+     */
     @Override
     public boolean clickMenuButton(Player player, int buttonId) {
-        if (partner == null
-                || !(player instanceof ServerPlayer serverPlayer)
-                || !stillValid(player)) {
+        if (partner == null || !(player instanceof ServerPlayer serverPlayer) || !stillValid(player)) {
             return false;
         }
-
         Optional<MaidWorkMode> selectedWork = MaidWorkMode.fromMenuButtonId(buttonId);
         if (selectedWork.isPresent()) {
-            return executeMenuIntent(
-                    serverPlayer,
-                    new MaidControlIntent.SetWorkMode(selectedWork.get()),
-                    "ui_button:work_mode:" + selectedWork.get().serializedName()
-            );
+            partner.setWorkMode(selectedWork.get());
+            sendFeedback(serverPlayer, "message.ai-partner.work_mode_changed");
+            return true;
         }
-
-        Optional<PartnerMenuAction> action = PartnerMenuAction.fromButtonId(buttonId);
-        if (action.isEmpty()) {
+        PartnerMenuAction action = PartnerMenuAction.fromButtonId(buttonId).orElse(null);
+        if (action == null) {
             return false;
         }
-
-        MaidControlIntent intent = menuIntent(action.get());
-        return executeMenuIntent(
-                serverPlayer,
-                intent,
-                "ui_button:" + action.get().name().toLowerCase(java.util.Locale.ROOT)
-        );
-    }
-
-    /**
-     * 执行不经过有限任务 DSL 的生活与日程按钮。
-     */
-    private MaidControlIntent menuIntent(PartnerMenuAction action) {
-        return switch (action) {
-            case FOLLOW, STAY, CANCEL -> new MaidControlIntent.RunTask(
-                    io.github.ozozorz.aipartner.contract.JobSpec.basic(
-                            java.util.Objects.requireNonNull(action.jobType())
-                    )
-            );
-            case RETURN_HOME -> new MaidControlIntent.ReturnHome();
-            case CYCLE_SCHEDULE -> new MaidControlIntent.SetSchedule(partner.getScheduleType().next());
-            case TOGGLE_HOME_BOUND -> new MaidControlIntent.SetHomeBound(!partner.isHomeBound());
-            case SET_WORK_LOCATION -> new MaidControlIntent.ConfigureLocation(ActivityLocationType.WORK, false);
-            case CLEAR_WORK_LOCATION -> new MaidControlIntent.ConfigureLocation(ActivityLocationType.WORK, true);
-            case SET_LEISURE_LOCATION -> new MaidControlIntent.ConfigureLocation(ActivityLocationType.LEISURE, false);
-            case CLEAR_LEISURE_LOCATION -> new MaidControlIntent.ConfigureLocation(ActivityLocationType.LEISURE, true);
-            case SET_SLEEP_LOCATION -> new MaidControlIntent.ConfigureLocation(ActivityLocationType.SLEEP, false);
-            case CLEAR_SLEEP_LOCATION -> new MaidControlIntent.ConfigureLocation(ActivityLocationType.SLEEP, true);
-            case DECREASE_RADIUS -> new MaidControlIntent.SetRadius(Math.max(1, partner.getActivityRadius() - 1));
-            case INCREASE_RADIUS -> new MaidControlIntent.SetRadius(Math.min(
+        switch (action) {
+            case FOLLOW -> partner.setMode(PartnerMode.FOLLOW);
+            case STAY -> partner.setMode(PartnerMode.STAY);
+            case WORK -> partner.setMode(PartnerMode.WORK);
+            case RETURN_HOME -> partner.requestReturnHome(serverPlayer);
+            case CYCLE_SCHEDULE -> partner.setScheduleType(partner.getScheduleType().next());
+            case TOGGLE_HOME_BOUND -> partner.setHomeBound(!partner.isHomeBound());
+            case SET_WORK_LOCATION -> partner.setActivityLocation(ActivityLocationType.WORK);
+            case CLEAR_WORK_LOCATION -> partner.clearActivityLocation(ActivityLocationType.WORK);
+            case SET_LEISURE_LOCATION -> partner.setActivityLocation(ActivityLocationType.LEISURE);
+            case CLEAR_LEISURE_LOCATION -> partner.clearActivityLocation(ActivityLocationType.LEISURE);
+            case SET_SLEEP_LOCATION -> partner.setActivityLocation(ActivityLocationType.SLEEP);
+            case CLEAR_SLEEP_LOCATION -> partner.clearActivityLocation(ActivityLocationType.SLEEP);
+            case DECREASE_RADIUS -> partner.setActivityRadius(Math.max(1, partner.getActivityRadius() - 1));
+            case INCREASE_RADIUS -> partner.setActivityRadius(Math.min(
                     MaidGameplayConfig.get().maximumActivityRadius(),
                     partner.getActivityRadius() + 1
             ));
-            case CYCLE_WORK_MODE -> new MaidControlIntent.SetWorkMode(partner.getWorkMode().next());
-            case CYCLE_COMBAT_POLICY -> new MaidControlIntent.SetCombatPolicy(partner.getCombatPolicy().next());
-        };
-    }
-
-    /** Dispatches one resolved UI action through the canonical semantic-action registry. */
-    private boolean executeMenuIntent(ServerPlayer player, MaidControlIntent intent, String rawInstruction) {
-        MaidControlDecision decision = MaidActionRegistry.execute(
-                partner,
-                player,
-                intent,
-                MaidActionRequest.direct(rawInstruction, "DIRECT_UI")
-        );
-        player.sendSystemMessage(decision.message());
-        return decision.accepted();
+            case CYCLE_WORK_MODE -> partner.setWorkMode(partner.getWorkMode().next());
+        }
+        sendFeedback(serverPlayer, action.responseKey());
+        return true;
     }
 
     @Override
     public void removed(Player player) {
         super.removed(player);
-        if (!player.level().isClientSide()) {
-            clearContainer(player, craftingInput);
-            craftingResult.clearContent();
-            if (partner != null) {
-                partner.onInventoryMenuClosed(player);
-            }
+        if (!player.level().isClientSide() && partner != null) {
+            partner.onInventoryMenuClosed(player);
         }
-    }
-
-    /** 服务端按原版 2×2 配方刷新结果槽；客户端只能接收同步结果。 */
-    @Override
-    public void slotsChanged(Container container) {
-        if (container != craftingInput
-                || !(menuPlayer instanceof ServerPlayer serverPlayer)
-                || !(menuPlayer.level() instanceof ServerLevel level)) {
-            return;
-        }
-        CraftingInput input = craftingInput.asCraftInput();
-        ItemStack result = ItemStack.EMPTY;
-        Optional<RecipeHolder<CraftingRecipe>> recipe = level.getServer()
-                .getRecipeManager()
-                .getRecipeFor(RecipeType.CRAFTING, input, level);
-        if (recipe.isPresent()
-                && craftingResult.setRecipeUsed(serverPlayer, recipe.get())) {
-            ItemStack assembled = recipe.get().value().assemble(input);
-            if (assembled.isItemEnabled(level.enabledFeatures())) {
-                result = assembled;
-            }
-        }
-        craftingResult.setItem(0, result);
-        setRemoteSlot(CRAFT_RESULT_SLOT, result);
-        serverPlayer.connection.send(new ClientboundContainerSetSlotPacket(
-                containerId,
-                incrementStateId(),
-                CRAFT_RESULT_SLOT,
-                result
-        ));
     }
 
     public @Nullable AiPartnerEntity partner() {
@@ -369,15 +248,7 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
     }
 
     public PartnerMode displayedMode() {
-        return enumByOrdinal(PartnerMode.values(), stateData.get(DATA_MODE), PartnerMode.IDLE);
-    }
-
-    public @Nullable JobType displayedJob() {
-        return nullableEnumByOrdinal(JobType.values(), stateData.get(DATA_JOB));
-    }
-
-    public @Nullable ContractStatus displayedContractStatus() {
-        return nullableEnumByOrdinal(ContractStatus.values(), stateData.get(DATA_CONTRACT_STATUS));
+        return enumByOrdinal(PartnerMode.values(), stateData.get(DATA_MODE), PartnerMode.STAY);
     }
 
     public float displayedHealth() {
@@ -436,12 +307,12 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
         return enumByOrdinal(MaidWorkMode.values(), stateData.get(DATA_WORK_MODE), MaidWorkMode.NONE);
     }
 
-    public CombatPolicy displayedCombatPolicy() {
-        return enumByOrdinal(
-                CombatPolicy.values(),
-                stateData.get(DATA_COMBAT_POLICY),
-                CombatPolicy.DEFEND_OWNER
-        );
+    public int displayedSkillCount() {
+        return stateData.get(DATA_SKILL_COUNT);
+    }
+
+    public int displayedContainerMemoryCount() {
+        return stateData.get(DATA_CONTAINER_MEMORY_COUNT);
     }
 
     private boolean tryQuickEquip(ItemStack itemStack) {
@@ -469,8 +340,6 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
             public int get(int index) {
                 return switch (index) {
                     case DATA_MODE -> partner.getMode().ordinal();
-                    case DATA_JOB -> partner.getCurrentContract().map(contract -> contract.job().type().ordinal()).orElse(-1);
-                    case DATA_CONTRACT_STATUS -> partner.getCurrentContract().map(contract -> contract.status().ordinal()).orElse(-1);
                     case DATA_HEALTH -> Math.round(partner.getHealth() * 10.0F);
                     case DATA_MAX_HEALTH -> Math.round(partner.getMaxHealth() * 10.0F);
                     case DATA_SCHEDULE_TYPE -> partner.getScheduleType().ordinal();
@@ -484,14 +353,16 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
                     case DATA_GROWTH_EXPERIENCE -> partner.getGrowthExperience();
                     case DATA_MAX_ACTIVITY_RADIUS -> MaidGameplayConfig.get().maximumActivityRadius();
                     case DATA_WORK_MODE -> partner.getWorkMode().ordinal();
-                    case DATA_COMBAT_POLICY -> partner.getCombatPolicy().ordinal();
+                    case DATA_SKILL_COUNT -> partner.getSkills().availableSkills().size();
+                    case DATA_CONTAINER_MEMORY_COUNT ->
+                            partner.getSkills().containerMemory().rememberedContainerCount();
                     default -> 0;
                 };
             }
 
             @Override
             public void set(int index, int value) {
-                // 菜单状态只允许服务端实体写入，客户端数据包不能反向修改实体。
+                // 菜单状态只允许服务端实体写入。
             }
 
             @Override
@@ -502,10 +373,7 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
     }
 
     private static ContainerData createClientStateData() {
-        SimpleContainerData data = new SimpleContainerData(DATA_COUNT);
-        data.set(DATA_JOB, -1);
-        data.set(DATA_CONTRACT_STATUS, -1);
-        return data;
+        return new SimpleContainerData(DATA_COUNT);
     }
 
     private static @Nullable AiPartnerEntity resolvePartner(Inventory playerInventory, int entityId) {
@@ -527,8 +395,8 @@ public final class AiPartnerMenu extends AbstractContainerMenu {
         return ordinal >= 0 && ordinal < values.length ? values[ordinal] : fallback;
     }
 
-    private static <E extends Enum<E>> @Nullable E nullableEnumByOrdinal(E[] values, int ordinal) {
-        return ordinal >= 0 && ordinal < values.length ? values[ordinal] : null;
+    private static void sendFeedback(ServerPlayer player, String translationKey) {
+        player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(translationKey));
     }
 
     /**

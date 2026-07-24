@@ -14,7 +14,6 @@ import net.fabricmc.loader.api.FabricLoader;
  * 女仆生活玩法的服务端配置。
  */
 public record MaidGameplayConfig(
-        int maxMaidsPerOwner,
         int defaultActivityRadius,
         int maximumActivityRadius,
         int duskStart,
@@ -34,7 +33,6 @@ public record MaidGameplayConfig(
             .getConfigDir()
             .resolve("ai-partner-gameplay.json");
     private static final MaidGameplayConfig DEFAULT = new MaidGameplayConfig(
-            1,
             8,
             32,
             12000,
@@ -88,9 +86,6 @@ public record MaidGameplayConfig(
     private static MaidGameplayConfig validate(MaidGameplayConfig config) {
         if (config == null) {
             throw new IllegalArgumentException("Missing gameplay configuration");
-        }
-        if (config.maxMaidsPerOwner < 1 || config.maxMaidsPerOwner > 32) {
-            throw new IllegalArgumentException("maxMaidsPerOwner must be between 1 and 32");
         }
         if (config.defaultActivityRadius < 1
                 || config.maximumActivityRadius < config.defaultActivityRadius

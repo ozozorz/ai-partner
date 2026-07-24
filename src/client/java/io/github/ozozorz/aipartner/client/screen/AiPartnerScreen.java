@@ -1,11 +1,9 @@
 package io.github.ozozorz.aipartner.client.screen;
 
-import io.github.ozozorz.aipartner.contract.ContractStatus;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.entity.PartnerMenuAction;
 import io.github.ozozorz.aipartner.entity.PartnerMode;
 import io.github.ozozorz.aipartner.inventory.AiPartnerMenu;
-import io.github.ozozorz.aipartner.job.JobType;
 import io.github.ozozorz.aipartner.life.ActivityLocationType;
 import io.github.ozozorz.aipartner.work.MaidWorkMode;
 import java.util.ArrayList;
@@ -21,7 +19,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
 
 /**
- * 展示女仆储物、装备、状态和行为按钮的客户端容器界面。
+ * 展示女仆实体、三种模式、技能化工作、装备和 35 格储物的菜单。
  */
 public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu> {
     private static final int WORK_MODES_PER_PAGE = 6;
@@ -34,11 +32,13 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
     private static final int LABEL_COLOR = 0xFFE8EDF2;
     private static final int MUTED_LABEL_COLOR = 0xFFB6C0CA;
 
+    private final Map<MaidWorkMode, Button> directWorkButtons = new EnumMap<>(MaidWorkMode.class);
+    private final List<Button> schedulePanelButtons = new ArrayList<>();
     private float mouseX;
     private float mouseY;
     private Button followButton;
     private Button stayButton;
-    private Button cancelButton;
+    private Button workButton;
     private Button scheduleButton;
     private Button homeBoundButton;
     private Button radiusDecreaseButton;
@@ -47,12 +47,9 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
     private Button leisureLocationClearButton;
     private Button sleepLocationClearButton;
     private Button workModeButton;
-    private Button combatPolicyButton;
     private Button panelToggleButton;
     private Button previousWorkPageButton;
     private Button nextWorkPageButton;
-    private final Map<MaidWorkMode, Button> directWorkButtons = new EnumMap<>(MaidWorkMode.class);
-    private final List<Button> schedulePanelButtons = new ArrayList<>();
     private boolean workPanelOpen;
     private int workPage;
 
@@ -69,83 +66,26 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
         super.init();
         directWorkButtons.clear();
         schedulePanelButtons.clear();
-        followButton = addRenderableWidget(createActionButton(
+        followButton = addRenderableWidget(createModeButton(
                 PartnerMenuAction.FOLLOW,
                 "gui.ai-partner.action.follow",
-                leftPos + 114
+                8
         ));
-        stayButton = addRenderableWidget(createActionButton(
+        stayButton = addRenderableWidget(createModeButton(
                 PartnerMenuAction.STAY,
                 "gui.ai-partner.action.stay",
-                leftPos + 170
+                41
         ));
-        cancelButton = addRenderableWidget(createActionButton(
-                PartnerMenuAction.CANCEL,
-                "gui.ai-partner.action.cancel",
-                leftPos + 226
-        ));
-        scheduleButton = addSchedulePanelButton(createSideButton(
-                PartnerMenuAction.CYCLE_SCHEDULE,
-                "gui.ai-partner.schedule.day_shift",
-                290,
-                82,
-                84
-        ));
-        homeBoundButton = addSchedulePanelButton(createSideButton(
-                PartnerMenuAction.TOGGLE_HOME_BOUND,
-                "gui.ai-partner.home_bound.on",
-                290,
-                102,
-                40
-        ));
-        addSchedulePanelButton(createSideButton(
-                PartnerMenuAction.RETURN_HOME,
-                "gui.ai-partner.action.home",
-                334,
-                102,
-                40
-        ));
-        workLocationClearButton = addLocationButtons(
-                PartnerMenuAction.SET_WORK_LOCATION,
-                PartnerMenuAction.CLEAR_WORK_LOCATION,
-                132
-        );
-        leisureLocationClearButton = addLocationButtons(
-                PartnerMenuAction.SET_LEISURE_LOCATION,
-                PartnerMenuAction.CLEAR_LEISURE_LOCATION,
-                152
-        );
-        sleepLocationClearButton = addLocationButtons(
-                PartnerMenuAction.SET_SLEEP_LOCATION,
-                PartnerMenuAction.CLEAR_SLEEP_LOCATION,
-                172
-        );
-        radiusDecreaseButton = addSchedulePanelButton(createSideButton(
-                PartnerMenuAction.DECREASE_RADIUS,
-                "gui.ai-partner.radius.decrease",
-                290,
-                202,
-                40
-        ));
-        radiusIncreaseButton = addSchedulePanelButton(createSideButton(
-                PartnerMenuAction.INCREASE_RADIUS,
-                "gui.ai-partner.radius.increase",
-                334,
-                202,
-                40
+        workButton = addRenderableWidget(createModeButton(
+                PartnerMenuAction.WORK,
+                "gui.ai-partner.action.work",
+                74
         ));
         workModeButton = addRenderableWidget(createSideButton(
                 PartnerMenuAction.CYCLE_WORK_MODE,
                 "gui.ai-partner.work_mode_button",
                 8,
-                174,
-                96
-        ));
-        combatPolicyButton = addRenderableWidget(createSideButton(
-                PartnerMenuAction.CYCLE_COMBAT_POLICY,
-                "gui.ai-partner.combat_policy_button",
-                8,
-                196,
+                132,
                 96
         ));
         panelToggleButton = addRenderableWidget(Button.builder(
@@ -155,16 +95,66 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
                             updatePanelVisibility();
                         }
                 )
-                .bounds(leftPos + 290, topPos + 60, 84, 18)
+                .bounds(leftPos + 290, topPos + 20, 84, 18)
                 .build());
+        scheduleButton = addSchedulePanelButton(createSideButton(
+                PartnerMenuAction.CYCLE_SCHEDULE,
+                "gui.ai-partner.schedule.day_shift",
+                290,
+                42,
+                84
+        ));
+        homeBoundButton = addSchedulePanelButton(createSideButton(
+                PartnerMenuAction.TOGGLE_HOME_BOUND,
+                "gui.ai-partner.home_bound.on",
+                290,
+                62,
+                40
+        ));
+        addSchedulePanelButton(createSideButton(
+                PartnerMenuAction.RETURN_HOME,
+                "gui.ai-partner.action.home",
+                334,
+                62,
+                40
+        ));
+        workLocationClearButton = addLocationButtons(
+                PartnerMenuAction.SET_WORK_LOCATION,
+                PartnerMenuAction.CLEAR_WORK_LOCATION,
+                84
+        );
+        leisureLocationClearButton = addLocationButtons(
+                PartnerMenuAction.SET_LEISURE_LOCATION,
+                PartnerMenuAction.CLEAR_LEISURE_LOCATION,
+                104
+        );
+        sleepLocationClearButton = addLocationButtons(
+                PartnerMenuAction.SET_SLEEP_LOCATION,
+                PartnerMenuAction.CLEAR_SLEEP_LOCATION,
+                124
+        );
+        radiusDecreaseButton = addSchedulePanelButton(createSideButton(
+                PartnerMenuAction.DECREASE_RADIUS,
+                "gui.ai-partner.radius.decrease",
+                290,
+                146,
+                40
+        ));
+        radiusIncreaseButton = addSchedulePanelButton(createSideButton(
+                PartnerMenuAction.INCREASE_RADIUS,
+                "gui.ai-partner.radius.increase",
+                334,
+                146,
+                40
+        ));
+
         for (MaidWorkMode mode : MaidWorkMode.values()) {
-            int index = mode.ordinal();
-            int row = index % WORK_MODES_PER_PAGE;
+            int row = mode.ordinal() % WORK_MODES_PER_PAGE;
             Button button = Button.builder(
                             Component.translatable("work_mode.ai-partner." + mode.serializedName()),
                             ignored -> sendMenuButton(mode.menuButtonId())
                     )
-                    .bounds(leftPos + 290, topPos + 82 + row * 20, 84, 18)
+                    .bounds(leftPos + 290, topPos + 42 + row * 20, 84, 18)
                     .build();
             directWorkButtons.put(mode, addRenderableWidget(button));
         }
@@ -175,7 +165,7 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
                             updatePanelVisibility();
                         }
                 )
-                .bounds(leftPos + 290, topPos + 202, 40, 18)
+                .bounds(leftPos + 290, topPos + 166, 40, 18)
                 .build());
         nextWorkPageButton = addRenderableWidget(Button.builder(
                         Component.literal(">"),
@@ -184,7 +174,7 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
                             updatePanelVisibility();
                         }
                 )
-                .bounds(leftPos + 334, topPos + 202, 40, 18)
+                .bounds(leftPos + 334, topPos + 166, 40, 18)
                 .build());
         updatePanelVisibility();
         updateButtonStates();
@@ -210,22 +200,14 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
         int y = topPos;
         graphics.fill(x, y, x + imageWidth, y + imageHeight, PANEL_COLOR);
         graphics.fill(x + 4, y + 16, x + 106, y + imageHeight - 6, SUB_PANEL_COLOR);
-        graphics.fill(x + 110, y + 16, x + imageWidth - 4, y + 94, SUB_PANEL_COLOR);
-        graphics.fill(x + 110, y + 124, x + imageWidth - 4, y + imageHeight - 6, SUB_PANEL_COLOR);
+        graphics.fill(x + 110, y + 16, x + 280, y + 94, SUB_PANEL_COLOR);
+        graphics.fill(x + 110, y + 124, x + 280, y + imageHeight - 6, SUB_PANEL_COLOR);
         graphics.fill(x + 286, y + 16, x + 378, y + imageHeight - 6, SUB_PANEL_COLOR);
 
         drawSlotGrid(graphics, x + AiPartnerMenu.STORAGE_LEFT, y + AiPartnerMenu.STORAGE_TOP, 9, 4);
         drawSlotGrid(graphics, x + AiPartnerMenu.EQUIPMENT_LEFT, y + AiPartnerMenu.EQUIPMENT_TOP, 5, 1);
         drawSlotGrid(graphics, x + AiPartnerMenu.PLAYER_LEFT, y + AiPartnerMenu.PLAYER_TOP, 9, 3);
         drawSlotGrid(graphics, x + AiPartnerMenu.PLAYER_LEFT, y + AiPartnerMenu.PLAYER_TOP + 58, 9, 1);
-        drawSlotGrid(graphics, x + AiPartnerMenu.CRAFTING_LEFT, y + AiPartnerMenu.CRAFTING_TOP, 2, 2);
-        drawSlotGrid(
-                graphics,
-                x + AiPartnerMenu.CRAFTING_RESULT_LEFT,
-                y + AiPartnerMenu.CRAFTING_RESULT_TOP,
-                1,
-                1
-        );
 
         AiPartnerEntity partner = menu.partner();
         if (partner != null) {
@@ -234,11 +216,11 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
                     x + 10,
                     y + 18,
                     x + 100,
-                    y + 90,
-                    30,
+                    y + 84,
+                    27,
                     0.0625F,
-                    this.mouseX,
-                    this.mouseY,
+                    mouseX,
+                    mouseY,
                     partner
             );
         }
@@ -259,43 +241,34 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
                 font,
                 Component.translatable("gui.ai-partner.equipment"),
                 AiPartnerMenu.EQUIPMENT_LEFT,
-                136,
+                157,
                 LABEL_COLOR,
                 false
         );
         graphics.text(font, playerInventoryTitle, inventoryLabelX, inventoryLabelY, LABEL_COLOR, false);
-        graphics.text(font, modeLine(), 8, 94, MUTED_LABEL_COLOR, false);
-        graphics.text(font, jobLine(), 8, 106, MUTED_LABEL_COLOR, false);
-        graphics.text(font, contractLine(), 8, 118, MUTED_LABEL_COLOR, false);
-        graphics.text(font, healthLine(), 8, 130, MUTED_LABEL_COLOR, false);
-        graphics.text(
-                font,
-                Component.translatable("gui.ai-partner.personal_crafting"),
-                290,
-                7,
-                LABEL_COLOR,
-                false
-        );
-        graphics.text(font, Component.literal("→"), 334, 34, MUTED_LABEL_COLOR, false);
+        graphics.text(font, modeLine(), 8, 87, MUTED_LABEL_COLOR, false);
+        graphics.text(font, healthLine(), 8, 97, MUTED_LABEL_COLOR, false);
+        graphics.text(font, growthLine(), 8, 190, MUTED_LABEL_COLOR, false);
         if (workPanelOpen) {
             graphics.text(
                     font,
                     Component.translatable("gui.ai-partner.work_page", workPage + 1, WORK_PAGE_COUNT),
                     290,
-                    221,
+                    188,
                     MUTED_LABEL_COLOR,
                     false
             );
         } else {
-            graphics.text(font, activityLine(), 290, 122, MUTED_LABEL_COLOR, false);
-            graphics.text(font, radiusLine(), 290, 192, MUTED_LABEL_COLOR, false);
-            graphics.text(font, growthAffectionLine(), 290, 221, MUTED_LABEL_COLOR, false);
+            graphics.text(font, activityLine(), 290, 170, MUTED_LABEL_COLOR, false);
+            graphics.text(font, radiusLine(), 290, 181, MUTED_LABEL_COLOR, false);
+            graphics.text(font, skillsLine(), 290, 192, MUTED_LABEL_COLOR, false);
+            graphics.text(font, memoryLine(), 290, 203, MUTED_LABEL_COLOR, false);
         }
     }
 
-    private Button createActionButton(PartnerMenuAction action, String translationKey, int x) {
+    private Button createModeButton(PartnerMenuAction action, String translationKey, int relativeX) {
         return Button.builder(Component.translatable(translationKey), button -> sendAction(action))
-                .bounds(x, topPos + 99, 50, 18)
+                .bounds(leftPos + relativeX, topPos + 110, 30, 18)
                 .build();
     }
 
@@ -328,13 +301,14 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
         ));
     }
 
-    /** 注册只属于生活/日程分页的按钮，切页时统一隐藏，避免与工作按钮重叠。 */
     private Button addSchedulePanelButton(Button button) {
         schedulePanelButtons.add(button);
         return addRenderableWidget(button);
     }
 
-    /** 在固定宽度侧栏中切换日程页或六项一页的具体工作选择。 */
+    /**
+     * 在固定侧栏中切换生活日程与工作技能组合分页。
+     */
     private void updatePanelVisibility() {
         workPage = Math.clamp(workPage, 0, WORK_PAGE_COUNT - 1);
         schedulePanelButtons.forEach(button -> button.visible = !workPanelOpen);
@@ -370,7 +344,7 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
     private void updateButtonStates() {
         if (followButton == null
                 || stayButton == null
-                || cancelButton == null
+                || workButton == null
                 || scheduleButton == null
                 || homeBoundButton == null
                 || radiusDecreaseButton == null
@@ -379,20 +353,13 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
                 || leisureLocationClearButton == null
                 || sleepLocationClearButton == null
                 || workModeButton == null
-                || combatPolicyButton == null
-                || panelToggleButton == null
-                || previousWorkPageButton == null
-                || nextWorkPageButton == null
                 || directWorkButtons.size() != MaidWorkMode.values().length) {
             return;
         }
         PartnerMode mode = menu.displayedMode();
-        followButton.active = mode != PartnerMode.FOLLOWING;
-        stayButton.active = mode != PartnerMode.STAYING;
-        ContractStatus status = menu.displayedContractStatus();
-        cancelButton.active = status == ContractStatus.ACCEPTED
-                || status == ContractStatus.RUNNING
-                || mode == PartnerMode.RETURNING_HOME;
+        followButton.active = mode != PartnerMode.FOLLOW;
+        stayButton.active = mode != PartnerMode.STAY;
+        workButton.active = mode != PartnerMode.WORK;
         scheduleButton.setMessage(Component.translatable(
                 "gui.ai-partner.schedule." + menu.displayedScheduleType().name().toLowerCase(Locale.ROOT)
         ));
@@ -411,67 +378,51 @@ public final class AiPartnerScreen extends AbstractContainerScreen<AiPartnerMenu
                 "gui.ai-partner.work_mode_button",
                 Component.translatable("work_mode.ai-partner." + menu.displayedWorkMode().serializedName())
         ));
-        directWorkButtons.forEach((workMode, button) -> button.active = workMode != menu.displayedWorkMode());
+        directWorkButtons.forEach((profile, button) -> button.active = profile != menu.displayedWorkMode());
         updatePanelVisibility();
-        combatPolicyButton.setMessage(Component.translatable(
-                "gui.ai-partner.combat_policy_button",
-                Component.translatable(
-                        "combat_policy.ai-partner." + menu.displayedCombatPolicy().serializedName()
-                )
-        ));
     }
 
     private Component modeLine() {
-        PartnerMode mode = menu.displayedMode();
         return Component.translatable(
                 "gui.ai-partner.mode",
-                Component.translatable("mode.ai-partner." + mode.name().toLowerCase(Locale.ROOT))
+                Component.translatable(
+                        "mode.ai-partner." + menu.displayedMode().name().toLowerCase(Locale.ROOT)
+                )
         );
     }
 
-    private Component jobLine() {
-        JobType job = menu.displayedJob();
-        Component value = job == null
-                ? Component.translatable("gui.ai-partner.none")
-                : Component.translatable("job.ai-partner." + job.name().toLowerCase(Locale.ROOT));
-        return Component.translatable("gui.ai-partner.job", value);
-    }
-
-    private Component contractLine() {
-        ContractStatus status = menu.displayedContractStatus();
-        Component value = status == null
-                ? Component.translatable("gui.ai-partner.none")
-                : Component.translatable("contract.ai-partner." + status.name().toLowerCase(Locale.ROOT));
-        return Component.translatable("gui.ai-partner.contract", value);
-    }
-
     private Component healthLine() {
-        String value = String.format(Locale.ROOT, "%.1f / %.1f", menu.displayedHealth(), menu.displayedMaxHealth());
+        String value = String.format(Locale.ROOT, "%.1f/%.1f", menu.displayedHealth(), menu.displayedMaxHealth());
         return Component.translatable("gui.ai-partner.health", value);
     }
 
     private Component activityLine() {
-        int remainingTicks = menu.displayedTicksUntilScheduleChange();
         Component activity = Component.translatable(
                 "gui.ai-partner.activity."
                         + menu.displayedScheduleActivity().name().toLowerCase(Locale.ROOT)
         );
-        if (remainingTicks < 0) {
-            return Component.translatable("gui.ai-partner.activity.continuous", activity);
-        }
-        int seconds = remainingTicks / 20;
-        return Component.translatable(
-                "gui.ai-partner.activity",
-                activity,
-                seconds
-        );
+        int remainingTicks = menu.displayedTicksUntilScheduleChange();
+        return remainingTicks < 0
+                ? Component.translatable("gui.ai-partner.activity.continuous", activity)
+                : Component.translatable("gui.ai-partner.activity", activity, remainingTicks / 20);
     }
 
     private Component radiusLine() {
         return Component.translatable("gui.ai-partner.radius", menu.displayedActivityRadius());
     }
 
-    private Component growthAffectionLine() {
+    private Component skillsLine() {
+        return Component.translatable("gui.ai-partner.skills", menu.displayedSkillCount());
+    }
+
+    private Component memoryLine() {
+        return Component.translatable(
+                "gui.ai-partner.container_memories",
+                menu.displayedContainerMemoryCount()
+        );
+    }
+
+    private Component growthLine() {
         return Component.translatable(
                 "gui.ai-partner.growth_affection_compact",
                 menu.displayedGrowthLevel(),

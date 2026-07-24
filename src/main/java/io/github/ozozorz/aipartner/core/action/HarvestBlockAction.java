@@ -1,6 +1,7 @@
 package io.github.ozozorz.aipartner.core.action;
 
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
+import io.github.ozozorz.aipartner.inventory.EquipmentLease;
 import java.util.Objects;
 import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
@@ -41,25 +42,27 @@ public final class HarvestBlockAction {
         if (!level.getBlockState(position).equals(expected) || !replanted.canSurvive(level, position)) {
             return false;
         }
-        ItemStack seed = inventory.takeOne(seedSelector);
-        if (seed.isEmpty()) {
+        EquipmentLease lease = EquipmentLease.acquire(partner, seedSelector).orElse(null);
+        if (lease == null) {
             return false;
         }
-        if (!level.setBlock(position, replanted, Block.UPDATE_ALL)) {
-            inventory.add(seed);
-            return false;
+        try (lease) {
+            if (!level.setBlock(position, replanted, Block.UPDATE_ALL)) {
+                return false;
+            }
+            Block.dropResources(
+                    expected,
+                    level,
+                    position,
+                    level.getBlockEntity(position),
+                    partner,
+                    partner.getMainHandItem()
+            );
+            partner.getMainHandItem().shrink(1);
+            partner.swing(InteractionHand.MAIN_HAND);
+            level.gameEvent(partner, GameEvent.BLOCK_CHANGE, position);
+            return true;
         }
-        Block.dropResources(
-                expected,
-                level,
-                position,
-                level.getBlockEntity(position),
-                partner,
-                partner.getMainHandItem()
-        );
-        partner.swing(InteractionHand.MAIN_HAND);
-        level.gameEvent(partner, GameEvent.BLOCK_CHANGE, position);
-        return true;
     }
 
     /**
@@ -87,18 +90,25 @@ public final class HarvestBlockAction {
         if (!inventory.canAdd(new ItemStack(Items.HONEY_BOTTLE))) {
             return false;
         }
-        ItemStack bottle = inventory.takeOne(Items.GLASS_BOTTLE);
-        if (bottle.isEmpty()) {
+        EquipmentLease bottleLease = EquipmentLease.acquire(
+                partner,
+                stack -> stack.is(Items.GLASS_BOTTLE)
+        ).orElse(null);
+        if (bottleLease == null) {
             return false;
         }
-        if (!inventory.add(new ItemStack(Items.HONEY_BOTTLE))) {
-            inventory.add(bottle);
-            return false;
+        try (bottleLease) {
+            ItemStack bottle = partner.getMainHandItem();
+            bottle.shrink(1);
+            if (!inventory.add(new ItemStack(Items.HONEY_BOTTLE))) {
+                bottle.grow(1);
+                return false;
+            }
+            hive.resetHoneyLevel(level, state, position);
+            level.playSound(null, position, SoundEvents.BOTTLE_FILL, SoundSource.BLOCKS, 1.0F, 1.0F);
+            partner.swing(InteractionHand.MAIN_HAND);
+            level.gameEvent(partner, GameEvent.FLUID_PICKUP, position);
+            return true;
         }
-        hive.resetHoneyLevel(level, state, position);
-        level.playSound(null, position, SoundEvents.BOTTLE_FILL, SoundSource.BLOCKS, 1.0F, 1.0F);
-        partner.swing(InteractionHand.MAIN_HAND);
-        level.gameEvent(partner, GameEvent.FLUID_PICKUP, position);
-        return true;
     }
 }

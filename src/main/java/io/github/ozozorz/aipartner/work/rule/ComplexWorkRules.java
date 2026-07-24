@@ -101,7 +101,7 @@ public final class ComplexWorkRules {
 
         @Override
         public WorkActionResult perform(MaidWorkContext context, WorkTarget target) {
-            if (!context.actions().inventory().hasAnySpace()) {
+            if (!context.skills().inventory().hasAnySpace()) {
                 return WorkActionResult.BLOCKED;
             }
             EquipmentLease axeLease = EquipmentLease.acquire(context.partner(), LumberjackRule::isAxe).orElse(null);
@@ -121,7 +121,7 @@ public final class ComplexWorkRules {
                     approvedLogs.remove(actionLog);
                     return WorkActionResult.RETRY;
                 }
-                if (!context.actions().breakBlock().destroyWithDrops(context.level(), actionLog)) {
+                if (!context.skills().breakBlock().destroyWithDrops(context.level(), actionLog)) {
                     return WorkActionResult.RETRY;
                 }
                 approvedLogs.remove(actionLog);
@@ -177,7 +177,7 @@ public final class ComplexWorkRules {
         @Override
         public boolean matchesBlock(MaidWorkContext context, BlockPos position, BlockState state) {
             return MiningSafety.isSafeExposedTarget(context, position)
-                    && context.actions().inventory().hasAnySpace();
+                    && context.skills().inventory().hasAnySpace();
         }
 
         @Override
@@ -202,7 +202,7 @@ public final class ComplexWorkRules {
             }
             try (lease) {
                 return isStillValid(context, target)
-                        && context.actions().breakBlock().destroyWithDrops(
+                        && context.skills().breakBlock().destroyWithDrops(
                                 context.level(),
                                 target.fallbackPosition()
                         ) ? WorkActionResult.SUCCESS : WorkActionResult.RETRY;

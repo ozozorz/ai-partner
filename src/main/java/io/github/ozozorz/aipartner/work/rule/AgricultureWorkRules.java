@@ -15,7 +15,6 @@ import net.minecraft.core.Direction;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.AttachedStemBlock;
 import net.minecraft.world.level.block.Block;
@@ -53,8 +52,8 @@ public final class AgricultureWorkRules {
         public boolean matchesBlock(MaidWorkContext context, BlockPos position, BlockState state) {
             Item seed = seedForMatureCrop(state);
             if (seed != null) {
-                return context.actions().inventory().contains(seed)
-                        && context.actions().inventory().hasAnySpace();
+                return context.skills().inventory().contains(seed)
+                        && context.skills().inventory().hasAnySpace();
             }
             return state.isAir() && plantForSoil(context, position) != null;
         }
@@ -68,7 +67,7 @@ public final class AgricultureWorkRules {
                 BlockState replanted = state.getBlock() instanceof CropBlock crop
                         ? crop.getStateForAge(0)
                         : state.setValue(NetherWartBlock.AGE, 0);
-                return context.actions().harvestBlock().harvestAndReplant(
+                return context.skills().harvestBlock().harvestAndReplant(
                         context.level(),
                         position,
                         state,
@@ -81,15 +80,12 @@ public final class AgricultureWorkRules {
             if (choice == null) {
                 return WorkActionResult.RETRY;
             }
-            ItemStack consumed = context.actions().inventory().takeOne(choice.seed());
-            if (consumed.isEmpty()) {
-                return WorkActionResult.BLOCKED;
-            }
-            if (!context.actions().placeBlock().place(context.level(), position, choice.state())) {
-                context.actions().inventory().add(consumed);
-                return WorkActionResult.RETRY;
-            }
-            return WorkActionResult.SUCCESS;
+            return context.skills().placeBlock().placeHeld(
+                    context.level(),
+                    position,
+                    choice.state(),
+                    stack -> stack.is(choice.seed())
+            ) ? WorkActionResult.SUCCESS : WorkActionResult.RETRY;
         }
 
         private static Item seedForMatureCrop(BlockState state) {
@@ -120,21 +116,21 @@ public final class AgricultureWorkRules {
             }
             BlockState soil = context.level().getBlockState(position.below());
             if (soil.is(Blocks.FARMLAND)) {
-                if (context.actions().inventory().contains(Items.WHEAT_SEEDS)) {
+                if (context.skills().inventory().contains(Items.WHEAT_SEEDS)) {
                     return new PlantChoice(Items.WHEAT_SEEDS, Blocks.WHEAT.defaultBlockState());
                 }
-                if (context.actions().inventory().contains(Items.CARROT)) {
+                if (context.skills().inventory().contains(Items.CARROT)) {
                     return new PlantChoice(Items.CARROT, Blocks.CARROTS.defaultBlockState());
                 }
-                if (context.actions().inventory().contains(Items.POTATO)) {
+                if (context.skills().inventory().contains(Items.POTATO)) {
                     return new PlantChoice(Items.POTATO, Blocks.POTATOES.defaultBlockState());
                 }
-                if (context.actions().inventory().contains(Items.BEETROOT_SEEDS)) {
+                if (context.skills().inventory().contains(Items.BEETROOT_SEEDS)) {
                     return new PlantChoice(Items.BEETROOT_SEEDS, Blocks.BEETROOTS.defaultBlockState());
                 }
             }
             if (soil.is(BlockTags.SUPPORTS_NETHER_WART)
-                    && context.actions().inventory().contains(Items.NETHER_WART)) {
+                    && context.skills().inventory().contains(Items.NETHER_WART)) {
                 return new PlantChoice(Items.NETHER_WART, Blocks.NETHER_WART.defaultBlockState());
             }
             return null;
@@ -151,10 +147,10 @@ public final class AgricultureWorkRules {
         public boolean matchesBlock(MaidWorkContext context, BlockPos position, BlockState state) {
             if (state.is(Blocks.SUGAR_CANE)) {
                 return context.level().getBlockState(position.below()).is(Blocks.SUGAR_CANE)
-                        && context.actions().inventory().hasAnySpace();
+                        && context.skills().inventory().hasAnySpace();
             }
             return state.isAir()
-                    && context.actions().inventory().contains(Items.SUGAR_CANE)
+                    && context.skills().inventory().contains(Items.SUGAR_CANE)
                     && Blocks.SUGAR_CANE.defaultBlockState().canSurvive(context.level(), position);
         }
 
@@ -164,23 +160,16 @@ public final class AgricultureWorkRules {
             BlockState state = context.level().getBlockState(position);
             if (state.is(Blocks.SUGAR_CANE)
                     && context.level().getBlockState(position.below()).is(Blocks.SUGAR_CANE)) {
-                return context.actions().breakBlock().destroyWithDrops(context.level(), position)
+                return context.skills().breakBlock().destroyWithDrops(context.level(), position)
                         ? WorkActionResult.SUCCESS
                         : WorkActionResult.RETRY;
             }
-            ItemStack cane = context.actions().inventory().takeOne(Items.SUGAR_CANE);
-            if (cane.isEmpty()) {
-                return WorkActionResult.BLOCKED;
-            }
-            if (!context.actions().placeBlock().place(
+            return context.skills().placeBlock().placeHeld(
                     context.level(),
                     position,
-                    Blocks.SUGAR_CANE.defaultBlockState()
-            )) {
-                context.actions().inventory().add(cane);
-                return WorkActionResult.RETRY;
-            }
-            return WorkActionResult.SUCCESS;
+                    Blocks.SUGAR_CANE.defaultBlockState(),
+                    stack -> stack.is(Items.SUGAR_CANE)
+            ) ? WorkActionResult.SUCCESS : WorkActionResult.RETRY;
         }
     }
 
@@ -194,12 +183,12 @@ public final class AgricultureWorkRules {
         public boolean matchesBlock(MaidWorkContext context, BlockPos position, BlockState state) {
             return (state.is(Blocks.MELON) || state.is(Blocks.PUMPKIN))
                     && isAttachedFruit(context, position)
-                    && context.actions().inventory().hasAnySpace();
+                    && context.skills().inventory().hasAnySpace();
         }
 
         @Override
         public WorkActionResult perform(MaidWorkContext context, WorkTarget target) {
-            return context.actions().breakBlock().destroyWithDrops(context.level(), target.fallbackPosition())
+            return context.skills().breakBlock().destroyWithDrops(context.level(), target.fallbackPosition())
                     ? WorkActionResult.SUCCESS
                     : WorkActionResult.RETRY;
         }
@@ -225,11 +214,11 @@ public final class AgricultureWorkRules {
         @Override
         public boolean matchesBlock(MaidWorkContext context, BlockPos position, BlockState state) {
             if (state.is(Blocks.COCOA) && state.getValue(CocoaBlock.AGE) >= CocoaBlock.MAX_AGE) {
-                return context.actions().inventory().contains(Items.COCOA_BEANS)
-                        && context.actions().inventory().hasAnySpace();
+                return context.skills().inventory().contains(Items.COCOA_BEANS)
+                        && context.skills().inventory().hasAnySpace();
             }
             return state.isAir()
-                    && context.actions().inventory().contains(Items.COCOA_BEANS)
+                    && context.skills().inventory().contains(Items.COCOA_BEANS)
                     && cocoaPlantState(context, position).isPresent();
         }
 
@@ -238,7 +227,7 @@ public final class AgricultureWorkRules {
             BlockPos position = target.fallbackPosition();
             BlockState state = context.level().getBlockState(position);
             if (state.is(Blocks.COCOA) && state.getValue(CocoaBlock.AGE) >= CocoaBlock.MAX_AGE) {
-                return context.actions().harvestBlock().harvestAndReplant(
+                return context.skills().harvestBlock().harvestAndReplant(
                         context.level(),
                         position,
                         state,
@@ -247,16 +236,15 @@ public final class AgricultureWorkRules {
                 ) ? WorkActionResult.SUCCESS : WorkActionResult.RETRY;
             }
             Optional<BlockState> plantedState = cocoaPlantState(context, position);
-            ItemStack bean = context.actions().inventory().takeOne(Items.COCOA_BEANS);
-            if (plantedState.isEmpty() || bean.isEmpty()) {
-                context.actions().inventory().add(bean);
+            if (plantedState.isEmpty()) {
                 return WorkActionResult.BLOCKED;
             }
-            if (!context.actions().placeBlock().place(context.level(), position, plantedState.get())) {
-                context.actions().inventory().add(bean);
-                return WorkActionResult.RETRY;
-            }
-            return WorkActionResult.SUCCESS;
+            return context.skills().placeBlock().placeHeld(
+                    context.level(),
+                    position,
+                    plantedState.get(),
+                    stack -> stack.is(Items.COCOA_BEANS)
+            ) ? WorkActionResult.SUCCESS : WorkActionResult.RETRY;
         }
 
         private static Optional<BlockState> cocoaPlantState(MaidWorkContext context, BlockPos position) {
@@ -278,7 +266,7 @@ public final class AgricultureWorkRules {
 
         @Override
         public boolean matchesBlock(MaidWorkContext context, BlockPos position, BlockState state) {
-            return context.actions().inventory().hasAnySpace()
+            return context.skills().inventory().hasAnySpace()
                     && (state.is(BlockTags.FLOWERS)
                     || state.is(Blocks.SHORT_GRASS)
                     || state.is(Blocks.TALL_GRASS)
@@ -288,7 +276,7 @@ public final class AgricultureWorkRules {
 
         @Override
         public WorkActionResult perform(MaidWorkContext context, WorkTarget target) {
-            return context.actions().breakBlock().destroyWithDrops(context.level(), target.fallbackPosition())
+            return context.skills().breakBlock().destroyWithDrops(context.level(), target.fallbackPosition())
                     ? WorkActionResult.SUCCESS
                     : WorkActionResult.RETRY;
         }
@@ -313,7 +301,7 @@ public final class AgricultureWorkRules {
         @Override
         public boolean matchesBlock(MaidWorkContext context, BlockPos position, BlockState state) {
             return (state.is(Blocks.SNOW) || state.is(Blocks.SNOW_BLOCK))
-                    && context.actions().inventory().hasAnySpace();
+                    && context.skills().inventory().hasAnySpace();
         }
 
         @Override
@@ -334,7 +322,7 @@ public final class AgricultureWorkRules {
                 return WorkActionResult.BLOCKED;
             }
             try (lease) {
-                return context.actions().breakBlock().destroyWithDrops(
+                return context.skills().breakBlock().destroyWithDrops(
                         context.level(),
                         target.fallbackPosition()
                 ) ? WorkActionResult.SUCCESS : WorkActionResult.RETRY;

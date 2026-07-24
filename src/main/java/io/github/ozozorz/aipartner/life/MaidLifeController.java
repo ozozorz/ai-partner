@@ -1,12 +1,9 @@
 package io.github.ozozorz.aipartner.life;
 
 import io.github.ozozorz.aipartner.config.MaidGameplayConfig;
-import io.github.ozozorz.aipartner.core.behavior.MaidBehaviorController;
-import io.github.ozozorz.aipartner.core.behavior.ManualDirective;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleActivity;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleController;
 import io.github.ozozorz.aipartner.core.schedule.ScheduleType;
-import io.github.ozozorz.aipartner.core.task.MaidTaskRuntime;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.entity.PartnerMode;
 import java.util.Comparator;
@@ -23,7 +20,7 @@ import net.minecraft.world.level.storage.ValueOutput;
 import org.jspecify.annotations.Nullable;
 
 /**
- * 仲裁日程、地点约束、回家和睡眠，并把导航目标写入 Brain 活动记忆。
+ * 在 FOLLOW、STAY、WORK 三种长期模式之下管理日程、活动地点、回家和睡眠。
  */
 public final class MaidLifeController {
     private static final int BED_RESCAN_INTERVAL_TICKS = 100;
@@ -31,8 +28,6 @@ public final class MaidLifeController {
     private static final double ARRIVAL_DISTANCE_SQUARED = 4.0;
 
     private final AiPartnerEntity partner;
-    private final MaidBehaviorController behaviorController;
-    private final MaidTaskRuntime taskRuntime;
     private final MaidGameplayConfig config;
     private final MaidLifeProfile profile;
     private final ScheduleController scheduleController;
@@ -44,23 +39,17 @@ public final class MaidLifeController {
     private long nextBedScanGameTime;
     private long sleepBlockedUntilGameTime;
     private boolean restingWithoutBed;
+    private boolean returningHome;
 
-    public MaidLifeController(
-            AiPartnerEntity partner,
-            MaidBehaviorController behaviorController,
-            MaidTaskRuntime taskRuntime,
-            MaidGameplayConfig config
-    ) {
+    public MaidLifeController(AiPartnerEntity partner, MaidGameplayConfig config) {
         this.partner = java.util.Objects.requireNonNull(partner, "partner");
-        this.behaviorController = java.util.Objects.requireNonNull(behaviorController, "behaviorController");
-        this.taskRuntime = java.util.Objects.requireNonNull(taskRuntime, "taskRuntime");
         this.config = java.util.Objects.requireNonNull(config, "config");
-        this.profile = new MaidLifeProfile(config.defaultActivityRadius());
-        this.scheduleController = new ScheduleController(config.scheduleWindows());
+        profile = new MaidLifeProfile(config.defaultActivityRadius());
+        scheduleController = new ScheduleController(config.scheduleWindows());
     }
 
     /**
-     * 生成成功后记录不会随女仆走动改变的默认家位置。
+     * 首次归属玩家时记录不会随走动改变的默认活动地点。
      */
     public void initializeDefaultHome() {
         if (profile.defaultHome().isEmpty()) {
@@ -73,80 +62,75 @@ public final class MaidLifeController {
     }
 
     /**
-     * 每个服务端 tick 重新计算长期活动；不在这里推进有限任务。
+     * 每个服务端 tick 仲裁长期生活活动；具体工作由技能化工作控制器推进。
      */
     public void tick() {
         if (!(partner.level() instanceof ServerLevel level)) {
             return;
         }
-        initializeDefaultHome();
-        ScheduleActivity nextActivity = scheduleController.activityAt(
-                profile.scheduleType(),
-                level.getOverworldClockTime()
-        );
-        if (nextActivity != currentActivity) {
-            wakeUp();
-            selectedBed = null;
-            nextBedScanGameTime = 0L;
-            currentActivity = nextActivity;
-            partner.showSpeechBubble(net.minecraft.network.chat.Component.translatable(
-                    "bubble.ai-partner.schedule." + nextActivity.name().toLowerCase(java.util.Locale.ROOT)
-            ));
+        if (partner.isTame()) {
+            initializeDefaultHome();
         }
+        updateSchedule(level);
 
-        if (behaviorController.isInventoryMenuOpen()) {
+        if (partner.isInventoryMenuOpen()) {
             movementTarget = null;
             partner.getNavigation().stop();
             return;
         }
-        if (behaviorController.isTemporarilyInterrupted()) {
+        if (partner.hasActiveCombatTarget()) {
             movementTarget = null;
             wakeUp();
             return;
         }
 
-        ManualDirective directive = behaviorController.manualDirective();
-        if (taskRuntime.hasFiniteTaskRunning()) {
-            releaseHomeRestriction();
-            wakeUp();
-            movementTarget = null;
-            return;
+        switch (partner.getMode()) {
+            case FOLLOW -> {
+                returningHome = false;
+                releaseHomeRestriction();
+                wakeUp();
+                movementTarget = null;
+            }
+            case STAY -> {
+                returningHome = false;
+                enforceStayAnchor();
+                wakeUp();
+                movementTarget = null;
+            }
+            case WORK -> {
+                if (returningHome) {
+                    wakeUp();
+                    handleReturnHome();
+                } else {
+                    handleScheduledActivity(level);
+                }
+            }
         }
-        if (directive == ManualDirective.FOLLOW) {
-            releaseHomeRestriction();
-            wakeUp();
-            movementTarget = null;
-            return;
-        }
-        if (directive == ManualDirective.STAY) {
-            enforceStayAnchor();
-            wakeUp();
-            movementTarget = null;
-            return;
-        }
-        if (directive == ManualDirective.RETURN_HOME) {
-            wakeUp();
-            handleReturnHome();
-            return;
-        }
-
-        behaviorController.setBackgroundMode(currentActivity.displayedMode());
-        handleScheduledActivity(level);
     }
 
     /**
-     * 在长期指令变化时立即建立待命锚点或解除地点限制。
+     * 模式变化时立即建立待命锚点或解除旧的位置限制。
      */
-    public void onManualDirectiveActivated(ManualDirective directive) {
+    public void onModeChanged(PartnerMode mode) {
         wakeUp();
         movementTarget = null;
-        if (directive == ManualDirective.STAY) {
+        returningHome = false;
+        if (mode == PartnerMode.STAY) {
             stayAnchor = ActivityLocation.at(partner.level(), partner.blockPosition(), 2);
             enforceStayAnchor();
-        } else if (directive == ManualDirective.FOLLOW) {
+        } else {
             stayAnchor = null;
             releaseHomeRestriction();
         }
+    }
+
+    /**
+     * 请求在 WORK 模式内返回当前日程对应地点。
+     */
+    public void requestReturnHome() {
+        returningHome = true;
+        wakeUp();
+        movementTarget = null;
     }
 
     public void onHurt() {
@@ -192,8 +176,8 @@ public final class MaidLifeController {
     }
 
     public void setActivityRadius(int radius) {
-        if (radius > config.maximumActivityRadius()) {
-            throw new IllegalArgumentException("Activity radius exceeds the configured maximum");
+        if (radius < 1 || radius > config.maximumActivityRadius()) {
+            throw new IllegalArgumentException("Activity radius exceeds the configured range");
         }
         profile.setActivityRadius(radius);
     }
@@ -221,22 +205,21 @@ public final class MaidLifeController {
     }
 
     /**
-     * 返回给活动导航行为的当前目标；跨维度地点不会产生导航目标。
+     * 返回给 Brain 活动导航行为的当前目标；跨维度地点不会产生导航目标。
      */
     public Optional<BlockPos> movementTarget() {
         return Optional.ofNullable(movementTarget);
     }
 
     public boolean canUseAmbientMovement() {
-        return !taskRuntime.hasRunningContract()
-                && behaviorController.manualDirective() == ManualDirective.NONE
-                && !behaviorController.isTemporarilyInterrupted()
+        return partner.getMode() == PartnerMode.WORK
+                && !partner.hasActiveCombatTarget()
                 && currentActivity != ScheduleActivity.SLEEP
                 && movementTarget == null;
     }
 
     /**
-     * 返回 WORK 活动对应的权威地点；未显式配置时回退到生成时默认家位置。
+     * 返回 WORK 活动边界；未配置时回退到首次归属位置。
      */
     public Optional<ActivityLocation> scheduledWorkBoundary() {
         return profile.locationFor(ScheduleActivity.WORK)
@@ -244,49 +227,43 @@ public final class MaidLifeController {
     }
 
     /**
-     * 持续工作只能在 WORK 时段、无手动/有限任务/战斗中断且已抵达工作区时推进。
+     * 持续工作只在 WORK 模式、工作时段、已抵达边界且没有 GUI/战斗中断时推进。
      */
     public boolean canPerformScheduledWork() {
-        return currentActivity == ScheduleActivity.WORK
-                && !behaviorController.isInventoryMenuOpen()
-                && !behaviorController.isTemporarilyInterrupted()
-                && !taskRuntime.hasFiniteTaskRunning()
-                && behaviorController.manualDirective() == ManualDirective.NONE
+        return partner.getMode() == PartnerMode.WORK
+                && currentActivity == ScheduleActivity.WORK
+                && !returningHome
+                && !partner.isInventoryMenuOpen()
+                && !partner.hasActiveCombatTarget()
                 && scheduledWorkBoundary()
                 .map(location -> location.contains(partner.level(), partner.blockPosition()))
                 .orElse(false);
     }
 
     /**
-     * 战斗目标受待命锚点或当前活动地点约束，FOLLOW 与直接有限任务仅保留距离上限。
+     * 战斗遵循狼式行为，同时尊重 STAY 锚点和 WORK 活动范围。
      */
     public boolean permitsCombatAt(BlockPos position) {
-        ManualDirective directive = behaviorController.manualDirective();
-        if (directive == ManualDirective.STAY) {
-            return stayAnchor != null && stayAnchor.contains(partner.level(), position);
-        }
-        if (directive == ManualDirective.FOLLOW || taskRuntime.hasFiniteTaskRunning()) {
-            return true;
-        }
-        return profile.locationFor(currentActivity)
-                .map(location -> location.contains(partner.level(), position))
-                .orElse(true);
+        return switch (partner.getMode()) {
+            case FOLLOW -> true;
+            case STAY -> stayAnchor != null && stayAnchor.contains(partner.level(), position);
+            case WORK -> profile.locationFor(currentActivity)
+                    .map(location -> location.contains(partner.level(), position))
+                    .orElse(true);
+        };
     }
 
     /**
-     * 限制待命和 homeBound 状态下的后台拾取范围。
+     * 限制待命和区域约束状态下的后台拾取范围。
      */
     public boolean permitsPickupAt(BlockPos position) {
-        ManualDirective directive = behaviorController.manualDirective();
-        if (directive == ManualDirective.STAY) {
-            return stayAnchor == null || stayAnchor.contains(partner.level(), position);
-        }
-        if (!profile.homeBound() || directive == ManualDirective.FOLLOW || taskRuntime.hasFiniteTaskRunning()) {
-            return true;
-        }
-        return profile.locationFor(currentActivity)
-                .map(location -> location.contains(partner.level(), position))
-                .orElse(true);
+        return switch (partner.getMode()) {
+            case FOLLOW -> true;
+            case STAY -> stayAnchor == null || stayAnchor.contains(partner.level(), position);
+            case WORK -> !profile.homeBound() || profile.locationFor(currentActivity)
+                    .map(location -> location.contains(partner.level(), position))
+                    .orElse(true);
+        };
     }
 
     public void save(ValueOutput output) {
@@ -296,6 +273,7 @@ public final class MaidLifeController {
             stayAnchor.save(output, "StayAnchor");
         }
         output.putLong("SleepBlockedUntil", sleepBlockedUntilGameTime);
+        output.putBoolean("ReturningHome", returningHome);
     }
 
     public void load(ValueInput input) {
@@ -309,18 +287,34 @@ public final class MaidLifeController {
         ));
         stayAnchor = ActivityLocation.load(input, "StayAnchor").orElse(null);
         sleepBlockedUntilGameTime = input.getLongOr("SleepBlockedUntil", 0L);
+        returningHome = input.getBooleanOr("ReturningHome", false);
         movementTarget = null;
         selectedBed = null;
         restingWithoutBed = false;
-        behaviorController.setBackgroundMode(currentActivity.displayedMode());
+    }
+
+    private void updateSchedule(ServerLevel level) {
+        ScheduleActivity nextActivity = scheduleController.activityAt(
+                profile.scheduleType(),
+                level.getOverworldClockTime()
+        );
+        if (nextActivity == currentActivity) {
+            return;
+        }
+        wakeUp();
+        selectedBed = null;
+        nextBedScanGameTime = 0L;
+        currentActivity = nextActivity;
+        partner.showSpeechBubble(net.minecraft.network.chat.Component.translatable(
+                "bubble.ai-partner.schedule." + nextActivity.name().toLowerCase(java.util.Locale.ROOT)
+        ));
     }
 
     private void handleReturnHome() {
         Optional<ActivityLocation> target = profile.locationFor(currentActivity);
         if (target.isEmpty() || !target.get().isIn(partner.level())) {
             movementTarget = null;
-            behaviorController.activateDirective(ManualDirective.NONE);
-            behaviorController.setBackgroundMode(currentActivity.displayedMode());
+            returningHome = false;
             partner.showSpeechBubble(net.minecraft.network.chat.Component.translatable(
                     "bubble.ai-partner.cannot_return_dimension"
             ));
@@ -328,14 +322,9 @@ public final class MaidLifeController {
         }
         ActivityLocation location = target.get();
         partner.setHomeTo(location.position(), location.radius());
-        if (partner.distanceToSqr(
-                location.position().getX() + 0.5,
-                location.position().getY(),
-                location.position().getZ() + 0.5
-        ) <= ARRIVAL_DISTANCE_SQUARED) {
+        if (partner.distanceToSqr(location.position().getCenter()) <= ARRIVAL_DISTANCE_SQUARED) {
             movementTarget = null;
-            behaviorController.activateDirective(ManualDirective.NONE);
-            behaviorController.setBackgroundMode(currentActivity.displayedMode());
+            returningHome = false;
             return;
         }
         movementTarget = location.position();
@@ -366,7 +355,6 @@ public final class MaidLifeController {
     private void handleSleep(ServerLevel level, ActivityLocation location) {
         if (level.getGameTime() < sleepBlockedUntilGameTime) {
             wakeUp();
-            behaviorController.setBackgroundMode(PartnerMode.RELAXING);
             movementTarget = null;
             return;
         }
@@ -382,11 +370,7 @@ public final class MaidLifeController {
             nextBedScanGameTime = level.getGameTime() + BED_RESCAN_INTERVAL_TICKS;
         }
         if (selectedBed != null) {
-            if (partner.distanceToSqr(
-                    selectedBed.getX() + 0.5,
-                    selectedBed.getY() + 0.5,
-                    selectedBed.getZ() + 0.5
-            ) <= ARRIVAL_DISTANCE_SQUARED) {
+            if (partner.distanceToSqr(selectedBed.getCenter()) <= ARRIVAL_DISTANCE_SQUARED) {
                 partner.getNavigation().stop();
                 partner.startSleeping(selectedBed);
                 movementTarget = null;

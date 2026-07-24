@@ -1,5 +1,4 @@
 {
-  "maxMaidsPerOwner": 1,
   "defaultActivityRadius": 8,
   "maximumActivityRadius": 32,
   "duskStart": 12000,

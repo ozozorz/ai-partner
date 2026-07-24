@@ -166,7 +166,7 @@ public final class MaidAi {
                 MemoryStatus.VALUE_PRESENT,
                 ModMemoryModules.PAUSED,
                 MemoryStatus.VALUE_ABSENT,
-                ModMemoryModules.TASK_CONTROLLED,
+                ModMemoryModules.WORK_CONTROLLED,
                 MemoryStatus.VALUE_ABSENT
         );
         return new RunOne<>(

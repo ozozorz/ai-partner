@@ -1,6 +1,7 @@
 package io.github.ozozorz.aipartner.client.render;
 
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
+import io.github.ozozorz.aipartner.AiPartnerMod;
 import io.github.ozozorz.aipartner.client.skin.SkinTextureCache;
 import net.minecraft.core.ClientAsset;
 import net.minecraft.client.model.HumanoidModel;
@@ -19,14 +20,12 @@ import net.minecraft.world.entity.player.PlayerSkin;
 import net.minecraft.world.item.ItemStack;
 
 /**
- * 使用 Minecraft 内置 Alex 瘦臂模型、官方皮肤、手持物层和护甲层渲染 AI 女仆。
+ * 使用瘦臂模型、模组内置女仆皮肤、手持物层和护甲层渲染 AI 女仆。
  */
 public final class AiPartnerRenderer
         extends HumanoidMobRenderer<AiPartnerEntity, AvatarRenderState, PlayerModel> {
-    // Renderer 需要最终纹理路径，而非 DefaultPlayerSkin 使用的逻辑资源 ID。
-    private static final Identifier ALEX_TEXTURE = Identifier.withDefaultNamespace(
-            "textures/entity/player/slim/alex.png"
-    );
+    private static final Identifier DEFAULT_MAID_TEXTURE =
+            AiPartnerMod.id("textures/entity/maid.png");
 
     public AiPartnerRenderer(EntityRendererProvider.Context context) {
         super(context, new PlayerModel(context.bakeLayer(ModelLayers.PLAYER_SLIM), true), 0.35F);
@@ -66,7 +65,7 @@ public final class AiPartnerRenderer
         state.showLeftSleeve = true;
         state.showRightSleeve = true;
         state.showCape = false;
-        Identifier bodyTexture = SkinTextureCache.location(entity.getSkinHash()).orElse(ALEX_TEXTURE);
+        Identifier bodyTexture = SkinTextureCache.location(entity.getSkinHash()).orElse(DEFAULT_MAID_TEXTURE);
         state.skin = PlayerSkin.insecure(
                 new ClientAsset.DownloadedTexture(bodyTexture, "ai-partner-local"),
                 null,

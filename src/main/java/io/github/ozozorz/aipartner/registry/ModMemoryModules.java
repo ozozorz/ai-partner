@@ -15,7 +15,7 @@ public final class ModMemoryModules {
     public static final MemoryModuleType<Unit> FOLLOW_OWNER = register("follow_owner");
     public static final MemoryModuleType<Unit> STAY_IN_PLACE = register("stay_in_place");
     public static final MemoryModuleType<Unit> PAUSED = register("paused");
-    public static final MemoryModuleType<Unit> TASK_CONTROLLED = register("task_controlled");
+    public static final MemoryModuleType<Unit> WORK_CONTROLLED = register("work_controlled");
     public static final MemoryModuleType<Unit> AMBIENT_MOVEMENT = register("ambient_movement");
     public static final MemoryModuleType<Unit> SCHEDULE_WORK = register("schedule_work");
     public static final MemoryModuleType<Unit> SCHEDULE_REST = register("schedule_rest");

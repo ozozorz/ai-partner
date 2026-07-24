@@ -1,9 +1,9 @@
 package io.github.ozozorz.aipartner.work;
 
-import io.github.ozozorz.aipartner.core.action.MaidActions;
 import io.github.ozozorz.aipartner.entity.AiPartnerEntity;
 import io.github.ozozorz.aipartner.life.ActivityLocation;
 import io.github.ozozorz.aipartner.life.MaidLifeController;
+import io.github.ozozorz.aipartner.skill.MaidSkillSet;
 import io.github.ozozorz.aipartner.work.supply.MaidWorkSupplyController;
 import io.github.ozozorz.aipartner.work.supply.WorkSupplyRequirement;
 import java.util.Iterator;
@@ -33,7 +33,7 @@ public final class MaidWorkController {
 
     private final AiPartnerEntity partner;
     private final MaidLifeController lifeController;
-    private final MaidActions actions;
+    private final MaidSkillSet skills;
     private final MaidWorkRegistry registry;
     private final MaidWorkSupplyController supplyController;
 
@@ -47,12 +47,16 @@ public final class MaidWorkController {
     private int pathFailures;
     private int stateTicks;
 
-    public MaidWorkController(AiPartnerEntity partner, MaidLifeController lifeController) {
+    public MaidWorkController(
+            AiPartnerEntity partner,
+            MaidLifeController lifeController,
+            MaidSkillSet skills
+    ) {
         this.partner = Objects.requireNonNull(partner, "partner");
         this.lifeController = Objects.requireNonNull(lifeController, "lifeController");
-        this.actions = MaidActions.create(partner);
+        this.skills = Objects.requireNonNull(skills, "skills");
         this.registry = MaidWorkRegistry.createDefault();
-        this.supplyController = new MaidWorkSupplyController(partner, actions);
+        this.supplyController = new MaidWorkSupplyController(partner, skills);
     }
 
     public MaidWorkMode mode() {
@@ -60,7 +64,7 @@ public final class MaidWorkController {
     }
 
     /**
-     * 切换持续工作会丢弃可重算的扫描目标，但不会触碰背包或有限任务。
+     * 切换工作技能组合会丢弃可重算的扫描目标，但不会触碰背包。
      */
     public void setMode(MaidWorkMode mode) {
         MaidWorkMode next = Objects.requireNonNull(mode, "mode");
@@ -69,7 +73,7 @@ public final class MaidWorkController {
         }
         this.mode = next;
         supplyController.reset();
-        actions.navigation().stop();
+        skills.navigation().stop();
         resetState();
     }
 
@@ -81,6 +85,22 @@ public final class MaidWorkController {
         return selected != null && selected.managesOwnExecution()
                 ? mode.name() + '_' + selected.managedExecutionState()
                 : mode.name() + '_' + state.name();
+    }
+
+    /**
+     * 工作控制器接管导航时，Brain 不再同时产生日程或跟随路径。
+     */
+    public boolean controlsMovement() {
+        return mode != MaidWorkMode.NONE
+                && lifeController.canPerformScheduledWork()
+                && state != State.IDLE;
+    }
+
+    /**
+     * 动作或回收阶段允许实体吸收附近的工作掉落物。
+     */
+    public boolean acceptsWorkDrops() {
+        return controlsMovement() && (state == State.ACTING || state == State.PICKING_UP);
     }
 
     public void tick() {
@@ -106,7 +126,11 @@ public final class MaidWorkController {
             return;
         }
 
-        MaidWorkContext context = new MaidWorkContext(partner, level, boundary, actions);
+        if (!skills.supports(mode.requiredSkills())) {
+            enterCooldown(BLOCKED_COOLDOWN_TICKS);
+            return;
+        }
+        MaidWorkContext context = new MaidWorkContext(partner, level, boundary, skills);
         if (activeRule != rule) {
             resetState();
             activeRule = rule;
@@ -156,7 +180,7 @@ public final class MaidWorkController {
             registry.ruleFor(mode).ifPresent(rule -> rule.onDeselected(level, partner));
         }
         supplyController.reset();
-        actions.navigation().stop();
+        skills.navigation().stop();
         resetState();
     }
 
@@ -245,7 +269,7 @@ public final class MaidWorkController {
         }
         BlockPos position = target.currentPosition(context.level());
         if (partner.distanceToSqr(position.getCenter()) <= INTERACTION_DISTANCE_SQUARED) {
-            actions.navigation().stop();
+            skills.navigation().stop();
             transition(State.ACTING);
             return;
         }
@@ -254,7 +278,7 @@ public final class MaidWorkController {
         }
         boolean pathStarted = target.resolveEntity(context.level())
                 .map(entity -> partner.getNavigation().moveTo(entity, 0.9))
-                .orElseGet(() -> actions.navigation().moveTo(position, 0.9));
+                .orElseGet(() -> skills.navigation().moveTo(position, 0.9));
         pathFailures = pathStarted ? 0 : pathFailures + 1;
         if (pathFailures > partner.getWorkPathRetryLimit(MAX_PATH_FAILURES)) {
             enterCooldown(BLOCKED_COOLDOWN_TICKS);
@@ -307,13 +331,13 @@ public final class MaidWorkController {
     private void pickUpDrops(MaidWorkContext context, MaidWorkRule rule) {
         ItemEntity drop = nearestCollectibleDrop(context).orElse(null);
         if (drop == null || stateTicks >= DROP_COLLECTION_TIMEOUT_TICKS) {
-            actions.navigation().stop();
+            skills.navigation().stop();
             actionPosition = null;
             enterCooldown(rule.successCooldownTicks());
             return;
         }
         if (stateTicks % 5 == 1) {
-            actions.pickupItem().moveTo(drop, 1.0);
+            skills.pickupItem().moveTo(drop, 1.0);
         }
     }
 
@@ -321,7 +345,7 @@ public final class MaidWorkController {
         if (actionPosition == null) {
             return java.util.Optional.empty();
         }
-        return actions.pickupItem().findNearest(
+        return skills.pickupItem().findNearest(
                 context.level(),
                 actionPosition,
                 DROP_COLLECTION_RADIUS,
@@ -381,7 +405,7 @@ public final class MaidWorkController {
         if (activeRule == null || !activeRule.managesOwnExecution() || boundary == null) {
             return;
         }
-        activeRule.onSuspended(new MaidWorkContext(partner, level, boundary, actions));
+        activeRule.onSuspended(new MaidWorkContext(partner, level, boundary, skills));
     }
 
     private void transition(State next) {
